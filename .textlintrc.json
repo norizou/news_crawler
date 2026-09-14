@@ -1,0 +1,11 @@
+{
+  "filters": {},
+  "rules": {
+    "preset-ja-technical-writing": {
+      "max-ten": false,
+      "sentence-length": false,
+      "no-exclamation-question-mark": false,
+      "no-mix-dearu-desumasu": false
+    }
+  }
+}

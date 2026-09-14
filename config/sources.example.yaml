@@ -1,0 +1,48 @@
+sources:
+  openai:
+    name: "OpenAI News"
+    category: "official"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://openai.com/news/"
+    feed_url: "https://openai.com/news/rss.xml"
+    list_url: "https://openai.com/news/"
+
+  deepmind:
+    name: "Google DeepMind Blog"
+    category: "official"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://deepmind.google/discover/blog/"
+    feed_url: "https://deepmind.google/blog/rss.xml"
+    list_url: "https://deepmind.google/discover/blog/"
+
+  huggingface:
+    name: "Hugging Face Blog"
+    category: "oss"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://huggingface.co/blog"
+    feed_url: "https://huggingface.co/blog/feed.xml"
+    list_url: "https://huggingface.co/blog"
+
+  techcrunch:
+    name: "TechCrunch AI"
+    category: "media"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://techcrunch.com/category/artificial-intelligence/"
+    feed_url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+    list_url: "https://techcrunch.com/category/artificial-intelligence/"
+
+  ledge_ai:
+    name: "Ledge.ai"
+    category: "domestic"
+    fetch_method: "html"
+    enabled: true
+    base_url: "https://ledge.ai/"
+    list_url: "https://ledge.ai/"
+    article_list_selector: "a[href*='/articles/']"
+    title_selector: "h1"
+    content_selector: "article"
+    date_selector: "time"

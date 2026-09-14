@@ -1,0 +1,27 @@
+{
+  "name": "ai_scraper",
+  "version": "1.0.0",
+  "description": "AI情報収集・週次トレンドスクレイピングシステム",
+  "private": true,
+  "scripts": {
+    "lint": "npm run lint:markdown && npm run lint:textlint",
+    "lint:markdown": "markdownlint \"**/*.md\" --ignore node_modules --ignore .venv --ignore output",
+    "lint:textlint": "textlint \"**/*.md\" --ignore-path .textlintignore",
+    "lint:fix": "npm run lint:markdown:fix && npm run lint:textlint:fix",
+    "lint:markdown:fix": "markdownlint \"**/*.md\" --ignore node_modules --ignore .venv --ignore output --fix",
+    "lint:textlint:fix": "textlint \"**/*.md\" --ignore-path .textlintignore --fix"
+  },
+  "keywords": [
+    "ai",
+    "scraper",
+    "crawler"
+  ],
+  "author": "asain",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "markdownlint-cli": "^0.49.1",
+    "textlint": "^15.8.0",
+    "textlint-rule-preset-ja-technical-writing": "^12.0.2"
+  }
+}

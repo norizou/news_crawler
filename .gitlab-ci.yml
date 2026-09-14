@@ -1,0 +1,35 @@
+stages:
+  - lint
+  - test
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+
+cache:
+  paths:
+    - .cache/pip
+    - .cache/uv
+    - node_modules/
+
+lint-docs:
+  stage: lint
+  image: node:22-alpine
+  script:
+    - npm ci
+    - npm run lint
+
+lint-python:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+  script:
+    - uv sync --locked
+    - uv run ruff check .
+    - uv run mypy src
+
+test-python:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+  script:
+    - uv sync --locked
+    - uv run pytest --cov=src --cov-report=term-missing

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>AI Sample Blog</title>
+    <link>https://example.com/blog</link>
+    <description>Latest AI Research and Models</description>
+    <item>
+      <title>Introducing Next-Gen AI Model</title>
+      <link>https://example.com/blog/next-gen-ai?utm_source=twitter&amp;utm_medium=social</link>
+      <description>&lt;p&gt;We are excited to announce our newest foundation model with reasoning capabilities.&lt;/p&gt;</description>
+      <pubDate>Mon, 14 Sep 2026 10:00:00 +0000</pubDate>
+      <author>AI Research Team</author>
+      <category>research</category>
+      <category>announcements</category>
+    </item>
+    <item>
+      <title>Scaling Laws for Autonomous Agents</title>
+      <link>https://example.com/blog/agent-scaling-laws</link>
+      <description>A comprehensive study on scaling behavior of multi-agent systems.</description>
+      <pubDate>Sun, 13 Sep 2026 15:30:00 +0000</pubDate>
+      <author>Dr. Jane Doe</author>
+    </item>
+  </channel>
+</rss>

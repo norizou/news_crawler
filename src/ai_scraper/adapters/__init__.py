@@ -1,0 +1,1 @@
+"""Source fetch adapters."""

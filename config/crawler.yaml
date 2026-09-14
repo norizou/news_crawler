@@ -1,0 +1,15 @@
+crawler:
+  download_delay: 1.5
+  concurrent_requests: 4
+  user_agent: "AI-Scraper/1.0 (+https://gitlab.dell.com/asain/ai_scraper)"
+  timeout_seconds: 30
+  retry_times: 3
+  retry_http_codes:
+    - 500
+    - 502
+    - 503
+    - 504
+    - 408
+    - 429
+  database_path: "data/articles.db"
+  output_dir: "output"
