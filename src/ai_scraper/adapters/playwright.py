@@ -30,6 +30,7 @@ class PlaywrightAdapter(BaseAdapter):
                 user_agent=self.crawler_config.user_agent,
                 viewport={"width": 1280, "height": 800},
                 extra_http_headers=self.source.headers,
+                ignore_https_errors=True,
             )
             page = await context.new_page()
 

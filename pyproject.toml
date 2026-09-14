@@ -21,6 +21,9 @@ dependencies = [
     "rich>=13.7.0",
     "scrapy>=2.11.0",
     "scrapy-playwright>=0.0.34",
+    "wordcloud>=1.9.6",
+    "sudachipy>=0.6.11",
+    "sudachidict-core>=20260723",
 ]
 
 [project.scripts]

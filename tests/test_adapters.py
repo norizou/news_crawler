@@ -7,6 +7,7 @@ import pytest
 import respx
 
 from ai_scraper.adapters.html import HTMLAdapter
+from ai_scraper.adapters.huggingface import HuggingFaceAdapter
 from ai_scraper.adapters.rss import RSSAdapter
 from ai_scraper.config import CrawlerConfig
 from ai_scraper.models import FetchMethod, SourceConfig
@@ -81,3 +82,44 @@ async def test_html_adapter():
     assert "groundbreaking experiment" in articles[0].content
     assert articles[0].author == "Alice Johnson"
     assert articles[0].published_at is not None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_huggingface_adapter():
+    api_url = "https://huggingface.co/api/models?author=deepseek-ai&limit=20"
+    payload = [
+        {
+            "modelId": "deepseek-ai/DeepSeek-Test",
+            "createdAt": "2026-09-10T02:17:58.000Z",
+            "likes": 2305,
+            "downloads": 288414,
+            "tags": ["transformers", "license:mit"],
+            "pipeline_tag": "text-generation",
+            "library_name": "transformers",
+        },
+        {"createdAt": "2026-09-11T00:00:00.000Z"},
+    ]
+    route = respx.get(api_url).mock(return_value=httpx.Response(200, json=payload))
+    source = SourceConfig(
+        key="deepseek_hf",
+        name="DeepSeek (Hugging Face)",
+        category="chinese_official",
+        fetch_method=FetchMethod.HUGGINGFACE,
+        base_url="https://huggingface.co/deepseek-ai",
+    )
+
+    articles = await HuggingFaceAdapter(source, CrawlerConfig()).fetch()
+
+    assert route.called
+    assert len(articles) == 1
+    assert articles[0].source_key == "deepseek_hf"
+    assert articles[0].title == "deepseek-ai/DeepSeek-Test"
+    assert articles[0].normalized_url == "https://huggingface.co/deepseek-ai/DeepSeek-Test"
+    assert articles[0].summary == (
+        "Pipeline: text-generation | Library: transformers | Likes: 2305 | Downloads: 288414"
+    )
+    assert articles[0].author == "deepseek-ai"
+    assert articles[0].tags == ["transformers", "license:mit"]
+    assert articles[0].published_at is not None
+    assert articles[0].content_hash

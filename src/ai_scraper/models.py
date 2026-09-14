@@ -16,6 +16,21 @@ class FetchMethod(StrEnum):
     HUGGINGFACE = "huggingface"
 
 
+class AIStatus(StrEnum):
+    """AI processing status."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AIResponse(BaseModel):
+    """AI-generated response containing Japanese title and summary."""
+
+    title_ja: str = Field(description="Japanese title")
+    summary_ja: str = Field(description="Japanese summary")
+
+
 class SourceConfig(BaseModel):
     """Configuration for a crawl target source."""
 
@@ -57,6 +72,14 @@ class Article(BaseModel):
     category: str = Field(default="general", description="Source category")
     author: str | None = Field(default=None, description="Article author")
     tags: list[str] = Field(default_factory=list, description="Tags or keywords")
+    title_ja: str = Field(default="", description="AI-generated Japanese title")
+    summary_ja: str = Field(default="", description="AI-generated Japanese summary")
+    ai_status: str = Field(default="pending", description="AI processing status")
+    ai_input_hash: str = Field(default="", description="Hash of input used for AI processing")
+    ai_model: str = Field(default="", description="AI model used for processing")
+    ai_prompt_version: str = Field(default="1", description="Prompt version used")
+    ai_processed_at: datetime | None = Field(default=None, description="AI processing timestamp")
+    ai_error: str | None = Field(default=None, description="AI processing error message")
 
 
 class CrawlResult(BaseModel):

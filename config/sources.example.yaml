@@ -38,7 +38,7 @@ sources:
   ledge_ai:
     name: "Ledge.ai"
     category: "domestic"
-    fetch_method: "html"
+    fetch_method: "playwright"
     enabled: true
     base_url: "https://ledge.ai/"
     list_url: "https://ledge.ai/"
@@ -46,3 +46,103 @@ sources:
     title_selector: "h1"
     content_selector: "article"
     date_selector: "time"
+
+  deepseek_hf:
+    name: "DeepSeek (Hugging Face)"
+    category: "chinese_official"
+    fetch_method: "huggingface"
+    enabled: true
+    base_url: "https://huggingface.co/deepseek-ai"
+
+  qwen_hf:
+    name: "Qwen (Hugging Face)"
+    category: "chinese_official"
+    fetch_method: "huggingface"
+    enabled: true
+    base_url: "https://huggingface.co/Qwen"
+
+  mit_tech_review:
+    name: "MIT Technology Review (AI)"
+    category: "media"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://www.technologyreview.com/topic/artificial-intelligence/"
+    feed_url: "https://www.technologyreview.com/topic/artificial-intelligence/feed/"
+    list_url: "https://www.technologyreview.com/topic/artificial-intelligence/"
+
+  ai_news:
+    name: "AI News"
+    category: "media"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://www.artificialintelligence-news.com/"
+    feed_url: "https://www.artificialintelligence-news.com/feed/"
+    list_url: "https://www.artificialintelligence-news.com/"
+
+  ars_technica:
+    name: "Ars Technica (AI)"
+    category: "media"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://arstechnica.com/tag/ai/"
+    feed_url: "https://arstechnica.com/tag/ai/feed/"
+    list_url: "https://arstechnica.com/tag/ai/"
+
+  ainow:
+    name: "AINOW"
+    category: "domestic"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://ainow.ai/"
+    feed_url: "https://ainow.ai/feed/"
+    list_url: "https://ainow.ai/"
+
+  aismiley:
+    name: "AIsmiley"
+    category: "domestic"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://aismiley.co.jp/ai-news_category/generative-ai/"
+    feed_url: "https://aismiley.co.jp/ai-news_category/generative-ai/feed/"
+    list_url: "https://aismiley.co.jp/ai-news_category/generative-ai/"
+
+  marktechpost:
+    name: "MarkTechPost"
+    category: "media"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://www.marktechpost.com/"
+    feed_url: "https://www.marktechpost.com/feed/"
+    list_url: "https://www.marktechpost.com/"
+
+  import_ai:
+    name: "Import AI (Jack Clark)"
+    category: "newsletter"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://importai.substack.com/"
+    feed_url: "https://importai.substack.com/feed"
+    list_url: "https://importai.substack.com/"
+
+  last_week_in_ai:
+    name: "Last Week in AI"
+    category: "newsletter"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://lastweekin.ai/"
+    feed_url: "https://lastweekin.ai/feed"
+    list_url: "https://lastweekin.ai/"
+
+  meta_llama_hf:
+    name: "Meta Llama (Hugging Face)"
+    category: "official"
+    fetch_method: "huggingface"
+    enabled: true
+    base_url: "https://huggingface.co/meta-llama"
+
+  mistralai_hf:
+    name: "Mistral AI (Hugging Face)"
+    category: "official"
+    fetch_method: "huggingface"
+    enabled: true
+    base_url: "https://huggingface.co/mistralai"

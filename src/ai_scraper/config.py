@@ -1,15 +1,33 @@
 """Configuration loader and schema validator."""
 
+import os
 from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ai_scraper.models import SourceConfig
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a professional translator and summarizer. "
+    "Your task is to process the provided article and output a JSON object "
+    "with the following structure:\n\n"
+    "{\n"
+    '  "title_ja": "Japanese translation of the article title",\n'
+    '  "summary_ja": "Japanese summary of the article content (2-3 sentences)"\n'
+    "}\n\n"
+    "Important guidelines:\n"
+    "- Translate the title accurately to Japanese\n"
+    "- Create a concise summary in Japanese (2-3 sentences)\n"
+    "- If the article is already in Japanese, still provide a refined Japanese summary\n"
+    "- Output ONLY the JSON object, no additional text\n"
+    "- Ensure the JSON is valid and properly formatted"
+)
 
 
 class CrawlerConfig(BaseModel):
@@ -31,15 +49,80 @@ class CrawlerConfig(BaseModel):
     output_dir: str = Field(default="output", description="Output directory for reports")
 
 
+class AIConfig(BaseModel):
+    """AI enrichment configuration."""
+
+    enabled: bool = Field(default=False, description="Enable AI enrichment")
+    proxy_url: str = Field(
+        default="http://localhost:11434/v1",
+        description="AIA Proxy base URL (OpenAI-compatible)",
+    )
+    model: str = Field(default="llama-3-3-70b-instruct", description="AI model to use")
+    request_interval: float = Field(default=2.0, description="Delay between AI requests in seconds")
+    timeout_seconds: int = Field(default=60, description="AI request timeout")
+    max_retries: int = Field(default=3, description="Max retry attempts for AI requests")
+    max_input_chars: int = Field(default=8000, description="Max input characters per article")
+    max_articles_per_run: int = Field(
+        default=50, description="Max articles to process per enrich run"
+    )
+    prompt_version: str = Field(default="1", description="Prompt version identifier")
+    system_prompt: str = Field(
+        default=DEFAULT_SYSTEM_PROMPT,
+        description="System prompt for AI translation and summarization",
+    )
+
+    @field_validator("system_prompt")
+    @classmethod
+    def validate_system_prompt(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("system_prompt must not be empty")
+        return v
+
+    @field_validator("request_interval")
+    @classmethod
+    def validate_interval(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("request_interval must be non-negative")
+        return v
+
+    @field_validator("max_input_chars")
+    @classmethod
+    def validate_max_input(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_input_chars must be positive")
+        return v
+
+    @field_validator("max_articles_per_run")
+    @classmethod
+    def validate_max_articles(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("max_articles_per_run must be positive")
+        return v
+
+
+class ReportConfig(BaseModel):
+    """Report and visualization configuration."""
+
+    visualize: bool = Field(default=True, description="Enable visualization")
+    top_n: int = Field(default=20, description="Top N words for frequency chart")
+    japanese_font_path: str = Field(default="", description="Path to Japanese font file")
+    output_assets_name: str = Field(default="assets", description="Name of assets directory")
+    wordcloud_width: int = Field(default=800, description="Word cloud width")
+    wordcloud_height: int = Field(default=400, description="Word cloud height")
+    ai_keywords_path: str = Field(default="config/ai_keywords.yaml", description="Path to AI keywords filter file")
+
+
 class AppConfig(BaseModel):
     """Full application configuration."""
 
     crawler: CrawlerConfig = Field(default_factory=CrawlerConfig)
+    ai: AIConfig = Field(default_factory=AIConfig)
+    report: ReportConfig = Field(default_factory=ReportConfig)
     sources: dict[str, SourceConfig] = Field(default_factory=dict)
 
 
 def load_config(config_dir: str | Path = "config") -> AppConfig:
-    """Load and parse crawler and sources configurations from YAML files."""
+    """Load and parse crawler, AI, and sources configurations from YAML files."""
     base_path = Path(config_dir)
 
     # 1. Load crawler config
@@ -53,7 +136,22 @@ def load_config(config_dir: str | Path = "config") -> AppConfig:
             elif data:
                 crawler_cfg = CrawlerConfig(**data)
 
-    # 2. Load sources config (fallback to sources.example.yaml if sources.yaml not found)
+    # 2. Load AI config
+    ai_cfg = AIConfig()
+    report_cfg = ReportConfig()
+    if crawler_file.exists():
+        with open(crawler_file, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+            if "ai" in data:
+                ai_cfg = AIConfig(**data["ai"])
+            if "report" in data:
+                report_cfg = ReportConfig(**data["report"])
+
+    # Environment variable overrides for AI config
+    ai_cfg.proxy_url = os.getenv("AIA_PROXY_URL", ai_cfg.proxy_url)
+    ai_cfg.model = os.getenv("AIA_MODEL", ai_cfg.model)
+
+    # 3. Load sources config (fallback to sources.example.yaml if sources.yaml not found)
     sources_dict: dict[str, SourceConfig] = {}
     sources_file = base_path / "sources.yaml"
     if not sources_file.exists():
@@ -75,4 +173,4 @@ def load_config(config_dir: str | Path = "config") -> AppConfig:
                     if isinstance(item, dict) and "key" in item:
                         sources_dict[item["key"]] = SourceConfig(**item)
 
-    return AppConfig(crawler=crawler_cfg, sources=sources_dict)
+    return AppConfig(crawler=crawler_cfg, ai=ai_cfg, report=report_cfg, sources=sources_dict)

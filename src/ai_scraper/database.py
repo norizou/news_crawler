@@ -37,7 +37,7 @@ class Database:
             conn.close()
 
     def _init_schema(self) -> None:
-        """Initialize relational tables and FTS5 virtual table."""
+        """Initialize relational tables and FTS5 virtual table with backward compatibility."""
         with self.connection() as conn:
             conn.executescript(
                 """
@@ -104,7 +104,7 @@ class Database:
                     FOREIGN KEY (run_id) REFERENCES crawl_runs (id) ON DELETE CASCADE
                 );
 
-                -- FTS5 Full-Text Search Virtual Table
+                -- FTS5 Full-Text Search Virtual Table for original text
                 CREATE VIRTUAL TABLE IF NOT EXISTS article_fts USING fts5(
                     title,
                     summary,
@@ -132,6 +132,85 @@ class Database:
                     INSERT INTO article_fts(rowid, title, summary, content, category)
                     VALUES (new.id, new.title, new.summary, new.content, new.category);
                 END;
+                """
+            )
+
+            # Backward compatible schema migration for AI fields
+            self._migrate_ai_columns(conn)
+            self._migrate_japanese_fts(conn)
+
+    def _migrate_ai_columns(self, conn: sqlite3.Connection) -> None:
+        """Add AI-related columns to articles table if they don't exist."""
+        columns_to_add = [
+            ("title_ja", "TEXT"),
+            ("summary_ja", "TEXT"),
+            ("ai_status", "TEXT DEFAULT 'pending'"),
+            ("ai_input_hash", "TEXT"),
+            ("ai_model", "TEXT"),
+            ("ai_prompt_version", "TEXT DEFAULT '1'"),
+            ("ai_processed_at", "TIMESTAMP"),
+            ("ai_error", "TEXT"),
+        ]
+
+        existing_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(articles)").fetchall()
+        }
+
+        for col_name, col_type in columns_to_add:
+            if col_name not in existing_columns:
+                conn.execute(f"ALTER TABLE articles ADD COLUMN {col_name} {col_type}")
+
+    def _migrate_japanese_fts(self, conn: sqlite3.Connection) -> None:
+        """Create Japanese FTS5 table with trigram tokenizer if it doesn't exist."""
+        # Check if table exists
+        table_exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='article_ja_fts'"
+        ).fetchone()
+
+        if not table_exists:
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE article_ja_fts USING fts5(
+                    title_ja,
+                    summary_ja,
+                    content='articles',
+                    content_rowid='id',
+                    tokenize='trigram'
+                )
+                """
+            )
+            # Rebuild index for existing articles
+            conn.execute(
+                """
+                INSERT INTO article_ja_fts(rowid, title_ja, summary_ja)
+                SELECT id, title_ja, summary_ja FROM articles
+                """
+            )
+            # Create triggers for synchronization
+            conn.execute(
+                """
+                CREATE TRIGGER articles_ja_ai AFTER INSERT ON articles BEGIN
+                    INSERT INTO article_ja_fts(rowid, title_ja, summary_ja)
+                    VALUES (new.id, new.title_ja, new.summary_ja);
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER articles_ja_ad AFTER DELETE ON articles BEGIN
+                    INSERT INTO article_ja_fts(article_ja_fts, rowid, title_ja, summary_ja)
+                    VALUES ('delete', old.id, old.title_ja, old.summary_ja);
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER articles_ja_au AFTER UPDATE ON articles BEGIN
+                    INSERT INTO article_ja_fts(article_ja_fts, rowid, title_ja, summary_ja)
+                    VALUES ('delete', old.id, old.title_ja, old.summary_ja);
+                    INSERT INTO article_ja_fts(rowid, title_ja, summary_ja)
+                    VALUES (new.id, new.title_ja, new.summary_ja);
+                END
                 """
             )
 
@@ -180,14 +259,15 @@ class Database:
             existing = cur.fetchone()
 
             if existing is None:
-                # New insert
+                # New insert - AI fields default to pending
                 cur = conn.execute(
                     """
                     INSERT INTO articles (
                         source_key, url, normalized_url, title, summary, content,
-                        published_at, fetched_at, content_hash, category, author, tags
+                        published_at, fetched_at, content_hash, category, author, tags,
+                        ai_status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                     """,
                     (
                         article.source_key,
@@ -207,13 +287,14 @@ class Database:
                 article.id = cur.lastrowid
                 article.normalized_url = norm_url
                 article.content_hash = content_hash
+                article.ai_status = "pending"
                 return article, True, False
 
             existing_id = existing["id"]
             existing_hash = existing["content_hash"]
 
             if existing_hash != content_hash:
-                # Content changed, update
+                # Content changed, update and reset AI status to pending
                 conn.execute(
                     """
                     UPDATE articles SET
@@ -226,7 +307,14 @@ class Database:
                         category = ?,
                         author = COALESCE(?, author),
                         tags = ?,
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at = CURRENT_TIMESTAMP,
+                        ai_status = 'pending',
+                        title_ja = '',
+                        summary_ja = '',
+                        ai_input_hash = '',
+                        ai_model = '',
+                        ai_processed_at = NULL,
+                        ai_error = NULL
                     WHERE id = ?
                     """,
                     (
@@ -245,9 +333,10 @@ class Database:
                 article.id = existing_id
                 article.normalized_url = norm_url
                 article.content_hash = content_hash
+                article.ai_status = "pending"
                 return article, False, True
 
-            # Unchanged
+            # Unchanged - preserve AI fields
             article.id = existing_id
             article.normalized_url = norm_url
             article.content_hash = content_hash
@@ -286,11 +375,36 @@ class Database:
     def search_articles(
         self, query_str: str, category: str | None = None, limit: int = 20
     ) -> list[SearchResult]:
-        """Full-text search across title, summary, and content using FTS5."""
+        """Full-text search across title, summary, content, and Japanese fields using FTS5."""
         if not query_str.strip():
             return []
 
-        # Sanitize FTS5 query token
+        # Search both original and Japanese FTS tables
+        english_results = self._search_english(query_str, category, limit)
+        japanese_results = self.search_articles_japanese(query_str, category, limit)
+
+        # Merge results, avoiding duplicates by article ID
+        seen_ids = set()
+        merged_results = []
+
+        for result in english_results:
+            if result.article.id not in seen_ids:
+                seen_ids.add(result.article.id)
+                merged_results.append(result)
+
+        for result in japanese_results:
+            if result.article.id not in seen_ids:
+                seen_ids.add(result.article.id)
+                merged_results.append(result)
+
+        # Sort by rank and limit
+        merged_results.sort(key=lambda x: x.rank)
+        return merged_results[:limit]
+
+    def _search_english(
+        self, query_str: str, category: str | None = None, limit: int = 20
+    ) -> list[SearchResult]:
+        """Search original text FTS index."""
         fts_query = " ".join(f'"{token}"' for token in query_str.strip().split() if token)
 
         sql = """
@@ -416,12 +530,176 @@ class Database:
                 "SELECT * FROM crawl_runs ORDER BY started_at DESC LIMIT 1"
             ).fetchone()
 
+            # AI statistics
+            ai_stats = conn.execute(
+                """
+                SELECT
+                    ai_status,
+                    COUNT(*) as count
+                FROM articles
+                GROUP BY ai_status
+                """
+            ).fetchall()
+            ai_status_counts = {row["ai_status"]: row["count"] for row in ai_stats}
+
             return {
                 "total_sources": total_sources,
                 "total_articles": total_articles,
                 "categories": {row["category"]: row["count"] for row in categories},
                 "latest_run": dict(latest_run) if latest_run else None,
+                "ai_status": ai_status_counts,
             }
+
+    def get_pending_articles(
+        self,
+        days: int = 7,
+        limit: int = 50,
+        retry_failed: bool = False,
+    ) -> list[Article]:
+        """Get articles pending AI enrichment within the last N days."""
+        cutoff_iso = (datetime.now() - timedelta(days=days)).isoformat()
+
+        query = """
+            SELECT * FROM articles
+            WHERE (published_at >= ? OR (published_at IS NULL AND fetched_at >= ?))
+            AND ai_status = 'pending'
+        """
+        params: list[Any] = [cutoff_iso, cutoff_iso]
+
+        if retry_failed:
+            query = query.replace("ai_status = 'pending'", "ai_status IN ('pending', 'failed')")
+
+        query += " ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT ?"
+        params.append(limit)
+
+        with self.connection() as conn:
+            cur = conn.execute(query, params)
+            rows = cur.fetchall()
+            return [self._row_to_article(row) for row in rows]
+
+    def save_ai_result(
+        self,
+        article_id: int,
+        title_ja: str,
+        summary_ja: str,
+        model: str,
+        prompt_version: str,
+        input_hash: str,
+    ) -> None:
+        """Save AI enrichment result for an article."""
+        processed_iso = datetime.now().isoformat()
+        with self.connection() as conn:
+            conn.execute(
+                """
+                UPDATE articles SET
+                    title_ja = ?,
+                    summary_ja = ?,
+                    ai_status = 'completed',
+                    ai_input_hash = ?,
+                    ai_model = ?,
+                    ai_prompt_version = ?,
+                    ai_processed_at = ?,
+                    ai_error = NULL
+                WHERE id = ?
+                """,
+                (
+                    title_ja,
+                    summary_ja,
+                    input_hash,
+                    model,
+                    prompt_version,
+                    processed_iso,
+                    article_id,
+                ),
+            )
+
+    def save_ai_failure(self, article_id: int, error_message: str) -> None:
+        """Save AI enrichment failure for an article."""
+        # Sanitize error message to avoid exposing secrets
+        sanitized_error = error_message[:500] if error_message else "Unknown error"
+        with self.connection() as conn:
+            conn.execute(
+                """
+                UPDATE articles SET
+                    ai_status = 'failed',
+                    ai_error = ?
+                WHERE id = ?
+                """,
+                (sanitized_error, article_id),
+            )
+
+    def search_articles_japanese(
+        self, query_str: str, category: str | None = None, limit: int = 20
+    ) -> list[SearchResult]:
+        """Search Japanese FTS index for articles."""
+        if not query_str.strip():
+            return []
+
+        # Try trigram FTS first
+        fts_query = " ".join(f'"{token}"' for token in query_str.strip().split() if token)
+
+        sql = """
+            SELECT
+                a.*,
+                snippet(article_ja_fts, 1, '<b>', '</b>', '...', 20) as snippet,
+                bm25(article_ja_fts) as rank
+            FROM article_ja_fts
+            JOIN articles a ON a.id = article_ja_fts.rowid
+            WHERE article_ja_fts MATCH ?
+        """
+        params: list[Any] = [fts_query]
+
+        if category:
+            sql += " AND a.category = ?"
+            params.append(category)
+
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+
+        with self.connection() as conn:
+            try:
+                cur = conn.execute(sql, params)
+                rows = cur.fetchall()
+                results = []
+                for row in rows:
+                    art = self._row_to_article(row)
+                    snippet_text = row["snippet"] if "snippet" in row.keys() else ""
+                    rank_score = float(row["rank"]) if "rank" in row.keys() else 0.0
+                    results.append(SearchResult(article=art, snippet=snippet_text, rank=rank_score))
+                return results
+            except sqlite3.OperationalError:
+                # Fallback to LIKE if trigram query fails
+                return self._search_japanese_fallback(query_str, category, limit)
+
+    def _search_japanese_fallback(
+        self, query_str: str, category: str | None = None, limit: int = 20
+    ) -> list[SearchResult]:
+        """Fallback LIKE search for very short Japanese terms."""
+        query = """
+            SELECT
+                a.*,
+                '' as snippet,
+                0.0 as rank
+            FROM articles a
+            WHERE (title_ja LIKE ? OR summary_ja LIKE ?)
+        """
+        params: list[Any] = [f"%{query_str}%", f"%{query_str}%"]
+
+        if category:
+            query += " AND a.category = ?"
+            params.append(category)
+
+        query += " ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT ?"
+        params.append(limit)
+
+        with self.connection() as conn:
+            cur = conn.execute(query, params)
+            rows = cur.fetchall()
+            results = []
+            for row in rows:
+                art = self._row_to_article(row)
+                results.append(SearchResult(article=art, snippet="", rank=0.0))
+            return results
 
     def _row_to_article(self, row: sqlite3.Row) -> Article:
         """Convert a database row into an Article model."""
@@ -435,6 +713,11 @@ class Database:
         fetch_at = row["fetched_at"]
         if isinstance(fetch_at, str):
             fetch_at = datetime.fromisoformat(fetch_at)
+
+        keys = row.keys()
+        ai_processed_at = row["ai_processed_at"] if "ai_processed_at" in keys else None
+        if isinstance(ai_processed_at, str):
+            ai_processed_at = datetime.fromisoformat(ai_processed_at)
 
         return Article(
             id=row["id"],
@@ -450,4 +733,66 @@ class Database:
             category=row["category"],
             author=row["author"],
             tags=tags_list,
+            title_ja=(
+                row["title_ja"]
+                if "title_ja" in keys and row["title_ja"] is not None
+                else ""
+            ),
+            summary_ja=(
+                row["summary_ja"]
+                if "summary_ja" in keys and row["summary_ja"] is not None
+                else ""
+            ),
+            ai_status=(
+                row["ai_status"]
+                if "ai_status" in keys and row["ai_status"] is not None
+                else "pending"
+            ),
+            ai_input_hash=(
+                row["ai_input_hash"]
+                if "ai_input_hash" in keys and row["ai_input_hash"] is not None
+                else ""
+            ),
+            ai_model=(
+                row["ai_model"]
+                if "ai_model" in keys and row["ai_model"] is not None
+                else ""
+            ),
+            ai_prompt_version=(
+                row["ai_prompt_version"]
+                if "ai_prompt_version" in keys and row["ai_prompt_version"] is not None
+                else "1"
+            ),
+            ai_processed_at=ai_processed_at,
+            ai_error=row["ai_error"] if "ai_error" in keys else None,
         )
+
+    def get_articles_in_range(
+        self,
+        start_at: datetime,
+        end_at: datetime,
+        category: str | None = None,
+    ) -> list[Article]:
+        """Fetch articles published or fetched within the specified date range."""
+        start_iso = start_at.isoformat()
+        end_iso = end_at.isoformat()
+
+        query = """
+            SELECT * FROM articles
+            WHERE (
+                (published_at >= ? AND published_at < ?)
+                OR (published_at IS NULL AND fetched_at >= ? AND fetched_at < ?)
+            )
+        """
+        params: list[Any] = [start_iso, end_iso, start_iso, end_iso]
+
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+
+        query += " ORDER BY COALESCE(published_at, fetched_at) DESC"
+
+        with self.connection() as conn:
+            cur = conn.execute(query, params)
+            rows = cur.fetchall()
+            return [self._row_to_article(row) for row in rows]

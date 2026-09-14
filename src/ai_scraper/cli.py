@@ -7,6 +7,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from ai_scraper.ai_processor import AIProcessor
 from ai_scraper.config import load_config
 from ai_scraper.coordinator import CrawlCoordinator
 from ai_scraper.database import Database
@@ -88,8 +89,27 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
     "--days",
     "-d",
     type=int,
-    default=7,
+    default=None,
     help="Number of days to include in report (default: 7).",
+)
+@click.option(
+    "--start-date",
+    type=str,
+    default=None,
+    help="Start date for report (YYYY-MM-DD).",
+)
+@click.option(
+    "--end-date",
+    type=str,
+    default=None,
+    help="End date for report (YYYY-MM-DD).",
+)
+@click.option(
+    "--period",
+    "-p",
+    type=click.Choice(["week", "month", "quarter"]),
+    default=None,
+    help="Predefined period for report.",
 )
 @click.option(
     "--category",
@@ -106,15 +126,43 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
     help="Output markdown file path (default: output/report_YYYYMMDD.md).",
 )
 @click.option(
+    "--visualize/--no-visualize",
+    default=None,
+    help="Enable/disable word cloud and charts (default: enabled in config).",
+)
+@click.option(
+    "--top-n",
+    type=click.IntRange(10, 50),
+    default=None,
+    help="Top N words for frequency charts (default: 20).",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def report(days: int, category: str | None, output: Path | None, config_dir: Path) -> None:
-    """Generate Markdown report from crawled articles."""
+def report(
+    days: int | None,
+    start_date: str | None,
+    end_date: str | None,
+    period: str | None,
+    category: str | None,
+    output: Path | None,
+    visualize: bool | None,
+    top_n: int | None,
+    config_dir: Path,
+) -> None:
+    """Generate Markdown report from crawled articles with visualizations."""
     app_config = load_config(config_dir)
     db = Database(app_config.crawler.database_path)
+
+    # Override config with CLI options
+    report_cfg = app_config.report.model_copy()
+    if visualize is not None:
+        report_cfg.visualize = visualize
+    if top_n is not None:
+        report_cfg.top_n = top_n
 
     if output is None:
         from datetime import datetime
@@ -122,9 +170,76 @@ def report(days: int, category: str | None, output: Path | None, config_dir: Pat
         today_str = datetime.now().strftime("%Y%m%d")
         output = Path(app_config.crawler.output_dir) / f"weekly_report_{today_str}.md"
 
-    md_content = generate_markdown_report(db, days=days, category=category, output_path=output)
-    console.print(f"[green]Report generated successfully:[/green] {output}")
-    console.print(f"Total report size: {len(md_content.splitlines())} lines")
+    try:
+        md_content = generate_markdown_report(
+            db,
+            days=days,
+            start_date=start_date,
+            end_date=end_date,
+            period=period,
+            category=category,
+            output_path=output,
+            report_config=report_cfg,
+        )
+        console.print(f"[green]Report generated successfully:[/green] {output}")
+        console.print(f"Total report size: {len(md_content.splitlines())} lines")
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        ctx = click.get_current_context()
+        click.echo(ctx.get_help())
+        ctx.exit(1)
+
+
+@main.command()
+@click.option(
+    "--days",
+    "-d",
+    type=int,
+    default=7,
+    help="Number of days to include in enrichment (default: 7).",
+)
+@click.option(
+    "--limit",
+    "-l",
+    type=int,
+    default=50,
+    help="Max articles to process (default: 50).",
+)
+@click.option(
+    "--retry-failed",
+    is_flag=True,
+    default=False,
+    help="Include failed articles in enrichment.",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def enrich(days: int, limit: int, retry_failed: bool, config_dir: Path) -> None:
+    """Enrich articles with AI-generated Japanese title and summary."""
+    app_config = load_config(config_dir)
+
+    if not app_config.ai.enabled:
+        console.print("[yellow]AI enrichment is disabled in configuration.[/yellow]")
+        return
+
+    db = Database(app_config.crawler.database_path)
+    processor = AIProcessor(app_config.ai, db)
+
+    console.print(f"Starting AI enrichment for articles from last {days} days...")
+    console.print(f"Max articles: {limit}, Retry failed: {retry_failed}")
+
+    stats = asyncio.run(
+        processor.enrich_articles(days=days, limit=limit, retry_failed=retry_failed)
+    )
+
+    console.print("\n[bold]Enrichment Summary:[/bold]")
+    console.print(f"  Total processed: {stats['total']}")
+    console.print(f"  Success: [green]{stats['success']}[/green]")
+    console.print(f"  Failed: [red]{stats['failed']}[/red]")
+    console.print(f"  Skipped: {stats['skipped']}")
 
 
 @main.command()
@@ -164,7 +279,10 @@ def search(query: str, category: str | None, limit: int, config_dir: Path) -> No
     for idx, res in enumerate(results, 1):
         art = res.article
         pub_date = art.published_at.strftime("%Y-%m-%d") if art.published_at else "No date"
-        console.print(f"[bold cyan]{idx}. {art.title}[/bold cyan]")
+
+        # Show Japanese title if available, otherwise original title
+        display_title = art.title_ja if art.title_ja else art.title
+        console.print(f"[bold cyan]{idx}. {display_title}[/bold cyan]")
         console.print(f"   URL: [blue]{art.url}[/blue]")
         meta_line = (
             f"   Category: [magenta]{art.category}[/magenta] | "
@@ -222,6 +340,13 @@ def stats(config_dir: Path) -> None:
     console.print("  Articles per Category:")
     for cat, count in info["categories"].items():
         console.print(f"    - [magenta]{cat}[/magenta]: {count}")
+
+    # AI statistics
+    if "ai_status" in info and info["ai_status"]:
+        console.print("\n[bold]AI Processing Status:[/bold]")
+        for status, count in info["ai_status"].items():
+            color = "green" if status == "completed" else "yellow" if status == "pending" else "red"
+            console.print(f"  {status.capitalize()}: [{color}]{count}[/{color}]")
 
 
 if __name__ == "__main__":

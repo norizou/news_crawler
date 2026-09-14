@@ -1,6 +1,6 @@
 # AI Scraper (ai_scraper) — AGENTS.md
 
-AI最新トレンド・技術動向を定期的に自動収集・要約・レポート化するスクレイピングシステム。
+AI最新トレンド・技術動向を定期的に自動収集・翻訳・要約・レポート化するスクレイピングシステム。
 
 - **リポジトリ**: `gitlab.dell.com/asain/ai_scraper` (または GitLab 公開リポジトリ)
 - **ローカルパス**: `~/dev/ai_scraper/`
@@ -39,11 +39,20 @@ uv run ai-scraper crawl --source openai
 # dry-run
 uv run ai-scraper crawl --dry-run
 
+# AI翻訳・要約 (config/crawler.yamlでai.enabled: true)
+uv run ai-scraper enrich --days 7 --limit 50
+
+# 失敗した記事を再試行
+uv run ai-scraper enrich --days 7 --retry-failed
+
 # レポート生成
 uv run ai-scraper report
 
-# 検索 (FTS5)
+# 検索 (FTS5、英文・日本語対応)
 uv run ai-scraper search "キーワード"
+
+# 統計確認 (AI処理ステータス含む)
+uv run ai-scraper stats
 ```
 
 ### 静的解析・テスト
