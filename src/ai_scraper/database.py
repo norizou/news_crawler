@@ -21,7 +21,7 @@ class Database:
         self._init_schema()
 
     @contextmanager
-    def connection(self) -> Generator[sqlite3.Connection, None, None]:
+    def connection(self) -> Generator[sqlite3.Connection]:
         """Provide a configured SQLite connection with foreign keys and WAL mode."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
