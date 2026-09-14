@@ -12,6 +12,8 @@ class FetchMethod(StrEnum):
     RSS = "rss"
     HTML = "html"
     PLAYWRIGHT = "playwright"
+    GITHUB = "github"
+    HUGGINGFACE = "huggingface"
 
 
 class SourceConfig(BaseModel):

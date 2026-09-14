@@ -3,9 +3,13 @@
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from ai_scraper.models import SourceConfig
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class CrawlerConfig(BaseModel):

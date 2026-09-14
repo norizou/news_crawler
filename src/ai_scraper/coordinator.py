@@ -7,7 +7,9 @@ from datetime import datetime
 from rich.console import Console
 
 from ai_scraper.adapters.base import BaseAdapter
+from ai_scraper.adapters.github import GitHubAdapter
 from ai_scraper.adapters.html import HTMLAdapter
+from ai_scraper.adapters.huggingface import HuggingFaceAdapter
 from ai_scraper.adapters.playwright import PlaywrightAdapter
 from ai_scraper.adapters.rss import RSSAdapter
 from ai_scraper.config import AppConfig
@@ -33,6 +35,10 @@ class CrawlCoordinator:
                 return HTMLAdapter(source, self.config.crawler)
             case FetchMethod.PLAYWRIGHT:
                 return PlaywrightAdapter(source, self.config.crawler)
+            case FetchMethod.GITHUB:
+                return GitHubAdapter(source, self.config.crawler)
+            case FetchMethod.HUGGINGFACE:
+                return HuggingFaceAdapter(source, self.config.crawler)
             case _:
                 return RSSAdapter(source, self.config.crawler)
 

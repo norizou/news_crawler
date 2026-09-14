@@ -46,3 +46,36 @@ sources:
     title_selector: "h1"
     content_selector: "article"
     date_selector: "time"
+
+  deepseek_hf:
+    name: "DeepSeek (Hugging Face)"
+    category: "chinese_official"
+    fetch_method: "huggingface"
+    enabled: true
+    base_url: "https://huggingface.co/deepseek-ai"
+
+  qwen_hf:
+    name: "Qwen (Hugging Face)"
+    category: "chinese_official"
+    fetch_method: "huggingface"
+    enabled: true
+    base_url: "https://huggingface.co/Qwen"
+
+  thudm_hf:
+    name: "THUDM (Hugging Face)"
+    category: "chinese_official"
+    fetch_method: "huggingface"
+    enabled: false
+    base_url: "https://huggingface.co/THUDM"
+
+  qwen_blog:
+    name: "Qwen Blog"
+    category: "chinese_official"
+    fetch_method: "html"
+    enabled: true
+    base_url: "https://qwenlm.github.io/"
+    list_url: "https://qwenlm.github.io/"
+    article_list_selector: "a.entry-link"
+    title_selector: "h2.entry-header"
+    content_selector: "div.entry-content"
+    date_selector: "span.entry-footer"
