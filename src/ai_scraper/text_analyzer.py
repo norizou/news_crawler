@@ -39,10 +39,17 @@ JAPANESE_STOPWORDS = {
 class TextAnalyzer:
     """Analyzer for Japanese and English text using morphological analysis and tokenization."""
 
-    def __init__(self, keywords_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        keywords_path: str | None = None,
+        sudachi_config_path: str | None = None,
+    ) -> None:
         try:
-            # SudachiPy initialization
-            self.dict = Dictionary()
+            # SudachiPy initialization (with optional user dictionaries)
+            if sudachi_config_path and Path(sudachi_config_path).exists():
+                self.dict = Dictionary(config_path=sudachi_config_path)
+            else:
+                self.dict = Dictionary()
             self.tokenizer = self.dict.create()
         except Exception as e:
             print(f"Error initializing SudachiPy: {e}")

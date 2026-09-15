@@ -65,6 +65,7 @@ disallow_untyped_defs = true
 module = [
     "feedparser.*",
     "playwright.*",
+    "sudachipy.*",
 ]
 ignore_missing_imports = true
 

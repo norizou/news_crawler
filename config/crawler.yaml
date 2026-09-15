@@ -21,7 +21,8 @@ report:
   output_assets_name: "assets"
   wordcloud_width: 800
   wordcloud_height: 400
-  ai_keywords_path: "config/ai_keywords.yaml"
+  ai_keywords_path: "config/keiba_keywords.yaml"
+  sudachi_config_path: "config/sudachi.json"
 
 ai:
   enabled: true

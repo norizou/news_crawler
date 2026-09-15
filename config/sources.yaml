@@ -1,271 +1,131 @@
+# 競馬ニュース収集ソース設定 (Mac 自宅用)
+# fetch_method: rss | html | playwright
+
 sources:
-  openai:
-    name: "OpenAI News"
-    category: "official"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://openai.com/news/"
-    feed_url: "https://openai.com/news/rss.xml"
-    list_url: "https://openai.com/news/"
-
-  deepmind:
-    name: "Google DeepMind Blog"
-    category: "official"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://deepmind.google/discover/blog/"
-    feed_url: "https://deepmind.google/blog/rss.xml"
-    list_url: "https://deepmind.google/discover/blog/"
-
-  huggingface:
-    name: "Hugging Face Blog"
-    category: "oss"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://huggingface.co/blog"
-    feed_url: "https://huggingface.co/blog/feed.xml"
-    list_url: "https://huggingface.co/blog"
-
-  techcrunch:
-    name: "TechCrunch AI"
+  # =====================
+  # RSS / Atom フィード
+  # =====================
+  netkeiba:
+    name: "netkeiba ニュース＆コラム"
     category: "media"
     fetch_method: "rss"
     enabled: true
-    base_url: "https://techcrunch.com/category/artificial-intelligence/"
-    feed_url: "https://techcrunch.com/category/artificial-intelligence/feed/"
-    list_url: "https://techcrunch.com/category/artificial-intelligence/"
+    base_url: "https://www.netkeiba.com/"
+    feed_url: "https://rss.netkeiba.com/?pid=rss_netkeiba&site=netkeiba"
+    list_url: "https://news.netkeiba.com/"
 
-  ledge_ai:
-    name: "Ledge.ai"
-    category: "domestic"
-    fetch_method: "playwright"
+  nikkansports:
+    name: "日刊スポーツ 競馬"
+    category: "sports_paper"
+    fetch_method: "rss"
     enabled: true
-    base_url: "https://ledge.ai/"
-    list_url: "https://ledge.ai/"
-    article_list_selector: "a[href*='/articles/']"
-    title_selector: "h1"
-    content_selector: "article"
-    date_selector: "time"
+    base_url: "https://www.nikkansports.com/keiba/"
+    feed_url: "https://www.nikkansports.com/keiba/atom.xml"
+    list_url: "https://www.nikkansports.com/keiba/"
 
-  deepseek_hf:
-    name: "DeepSeek (Hugging Face)"
-    category: "chinese_official"
-    fetch_method: "huggingface"
+  google_news_keiba:
+    name: "Google News (競馬)"
+    category: "aggregator"
+    fetch_method: "rss"
     enabled: true
-    base_url: "https://huggingface.co/deepseek-ai"
+    base_url: "https://news.google.com/"
+    feed_url: "https://news.google.com/rss/search?q=%E7%AB%B6%E9%A6%AC&hl=ja&gl=JP&ceid=JP:ja"
+    list_url: "https://news.google.com/search?q=競馬&hl=ja&gl=JP&ceid=JP:ja"
 
-  qwen_hf:
-    name: "Qwen (Hugging Face)"
-    category: "chinese_official"
-    fetch_method: "huggingface"
+  google_news_jra:
+    name: "Google News (JRA)"
+    category: "aggregator"
+    fetch_method: "rss"
     enabled: true
-    base_url: "https://huggingface.co/Qwen"
+    base_url: "https://news.google.com/"
+    feed_url: "https://news.google.com/rss/search?q=JRA&hl=ja&gl=JP&ceid=JP:ja"
+    list_url: "https://news.google.com/search?q=JRA&hl=ja&gl=JP&ceid=JP:ja"
 
-  thudm_hf:
-    name: "THUDM (Hugging Face)"
-    category: "chinese_official"
-    fetch_method: "huggingface"
-    enabled: false
-    base_url: "https://huggingface.co/THUDM"
-
-  qwen_blog:
-    name: "Qwen Blog"
-    category: "chinese_official"
+  # =====================
+  # HTML スクレイプ (Scrapy相当: 静的HTML)
+  # =====================
+  jra:
+    name: "JRA 公式ニュース"
+    category: "official"
     fetch_method: "html"
     enabled: true
-    base_url: "https://qwenlm.github.io/"
-    list_url: "https://qwenlm.github.io/"
-    article_list_selector: "a.entry-link"
-    title_selector: "h2.entry-header"
-    content_selector: "div.entry-content"
-    date_selector: "span.entry-footer"
+    base_url: "https://www.jra.go.jp/"
+    list_url: "https://www.jra.go.jp/news/"
+    article_list_selector: "div.news_line a"
+    title_selector: ".news_title h1"
+    content_selector: ".news_body"
+    date_selector: ".news_title p.date"
 
-  mit_tech_review:
-    name: "MIT Technology Review (AI)"
+  radionikkei:
+    name: "ラジオNIKKEI 競馬実況Web"
     category: "media"
-    fetch_method: "rss"
+    fetch_method: "html"
     enabled: true
-    base_url: "https://www.technologyreview.com/topic/artificial-intelligence/"
-    feed_url: "https://www.technologyreview.com/topic/artificial-intelligence/feed/"
-    list_url: "https://www.technologyreview.com/topic/artificial-intelligence/"
+    base_url: "https://www.radionikkei.jp/"
+    list_url: "https://www.radionikkei.jp/keiba/"
+    article_list_selector: "a[href^='/keiba_article/news/']"
+    title_selector: "h2.proglam-article-title"
+    content_selector: ".article-box"
+    date_selector: "time.articles-time"
 
-  ai_news:
-    name: "AI News"
+  sponichi:
+    name: "スポニチ競馬Web"
+    category: "sports_paper"
+    fetch_method: "html"
+    enabled: true
+    base_url: "https://keiba.sponichi.co.jp/"
+    list_url: "https://keiba.sponichi.co.jp/"
+    article_list_selector: "a[href^='/news/2']"
+    title_selector: "h1.title-main-heading"
+    content_selector: ".article-topics-paragraph"
+    date_selector: ".title-main-date"
+
+  sanspo:
+    name: "サンスポZBAT! 中央競馬"
+    category: "sports_paper"
+    fetch_method: "html"
+    enabled: true
+    base_url: "https://www.sanspo.com/"
+    list_url: "https://www.sanspo.com/race/keiba/"
+    article_list_selector: "a[href^='/race/article/']"
+    title_selector: "h1.article-headline"
+    content_selector: "div.article-body"
+    date_selector: "time[datetime]"
+
+  keibalab:
+    name: "競馬ラボ"
     category: "media"
-    fetch_method: "rss"
+    fetch_method: "html"
     enabled: true
-    base_url: "https://www.artificialintelligence-news.com/"
-    feed_url: "https://www.artificialintelligence-news.com/feed/"
-    list_url: "https://www.artificialintelligence-news.com/"
+    base_url: "https://keibalab.jp/"
+    list_url: "https://keibalab.jp/"
+    article_list_selector: "a[href^='/topics/']"
+    title_selector: "h1.heading02"
+    content_selector: "div.post"
+    date_selector: ".date.clear.tR"
 
-  ars_technica:
-    name: "Ars Technica (AI)"
-    category: "media"
-    fetch_method: "rss"
+  # =====================
+  # Playwright (JS描画が必要)
+  # =====================
+  tospo:
+    name: "東スポ競馬"
+    category: "sports_paper"
+    fetch_method: "playwright"
     enabled: true
-    base_url: "https://arstechnica.com/tag/ai/"
-    feed_url: "https://arstechnica.com/tag/ai/feed/"
-    list_url: "https://arstechnica.com/tag/ai/"
+    base_url: "https://tospo-keiba.jp/"
+    list_url: "https://tospo-keiba.jp/news"
+    article_list_selector: "a[href*='/breaking_news/']"
+    title_selector: "h1.single-ttl"
+    content_selector: "div.article-content-main"
+    date_selector: "div.single-date"
 
-  ainow:
-    name: "AINOW"
-    category: "domestic"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://ainow.ai/"
-    feed_url: "https://ainow.ai/feed/"
-    list_url: "https://ainow.ai/"
-
-  aismiley:
-    name: "AIsmiley"
-    category: "domestic"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://aismiley.co.jp/ai-news_category/generative-ai/"
-    feed_url: "https://aismiley.co.jp/ai-news_category/generative-ai/feed/"
-    list_url: "https://aismiley.co.jp/ai-news_category/generative-ai/"
-
-  marktechpost:
-    name: "MarkTechPost"
-    category: "media"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://www.marktechpost.com/"
-    feed_url: "https://www.marktechpost.com/feed/"
-    list_url: "https://www.marktechpost.com/"
-
-  import_ai:
-    name: "Import AI (Jack Clark)"
-    category: "newsletter"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://importai.substack.com/"
-    feed_url: "https://importai.substack.com/feed"
-    list_url: "https://importai.substack.com/"
-
-  last_week_in_ai:
-    name: "Last Week in AI"
-    category: "newsletter"
-    fetch_method: "rss"
-    enabled: true
-    base_url: "https://lastweekin.ai/"
-    feed_url: "https://lastweekin.ai/feed"
-    list_url: "https://lastweekin.ai/"
-
-  meta_llama_hf:
-    name: "Meta Llama (Hugging Face)"
-    category: "official"
-    fetch_method: "huggingface"
-    enabled: true
-    base_url: "https://huggingface.co/meta-llama"
-
-  mistralai_hf:
-    name: "Mistral AI (Hugging Face)"
-    category: "official"
-    fetch_method: "huggingface"
-    enabled: true
-    base_url: "https://huggingface.co/mistralai"
-
-  # Disabled sources (access issues or no RSS feed)
-  venturebeat:
-    name: "VentureBeat (AI)"
-    category: "media"
+  # =====================
+  # 無効化 (必要に応じて有効化)
+  # =====================
+  kaba_tsu_jra:
+    name: "TSL JRA指数予想"
+    category: "prediction"
     fetch_method: "rss"
     enabled: false
-    base_url: "https://venturebeat.com/category/ai/"
-    feed_url: "https://venturebeat.com/category/ai/feed/"
-    list_url: "https://venturebeat.com/category/ai/"
-
-  wired:
-    name: "Wired (AI)"
-    category: "media"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://www.wired.com/tag/artificial-intelligence/"
-    feed_url: "https://www.wired.com/tag/artificial-intelligence/feed/"
-    list_url: "https://www.wired.com/tag/artificial-intelligence/"
-
-  the_verge:
-    name: "The Verge (AI)"
-    category: "media"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://www.theverge.com/ai-artificial-intelligence"
-    feed_url: "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml"
-    list_url: "https://www.theverge.com/ai-artificial-intelligence"
-
-  itmedia_ai:
-    name: "ITmedia AI+"
-    category: "domestic"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://www.itmedia.co.jp/aiplus/"
-    list_url: "https://www.itmedia.co.jp/aiplus/"
-
-  ai_market:
-    name: "AI Market"
-    category: "domestic"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://ai-market.jp/category/news/"
-    feed_url: "https://ai-market.jp/category/news/feed/"
-    list_url: "https://ai-market.jp/category/news/"
-
-  ai_souken:
-    name: "AI総研"
-    category: "domestic"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://metaversesouken.com/ai/generative_ai/media/"
-    feed_url: "https://metaversesouken.com/ai/generative_ai/media/feed/"
-    list_url: "https://metaversesouken.com/ai/generative_ai/media/"
-
-  zdnet_japan:
-    name: "ZDNET Japan (AI)"
-    category: "domestic"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://japan.zdnet.com/topic/ai/"
-    feed_url: "https://japan.zdnet.com/topic/ai/feed/"
-    list_url: "https://japan.zdnet.com/topic/ai/"
-
-  the_rundown_ai:
-    name: "The Rundown AI"
-    category: "newsletter"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://www.therundown.ai/"
-    feed_url: "https://www.therundown.ai/rss"
-    list_url: "https://www.therundown.ai/"
-
-  the_batch:
-    name: "The Batch (DeepLearning.AI)"
-    category: "newsletter"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://www.deeplearning.ai/the-batch/"
-    feed_url: "https://www.deeplearning.ai/the-batch/feed"
-    list_url: "https://www.deeplearning.ai/the-batch/"
-
-  tldr_ai:
-    name: "TLDR AI"
-    category: "newsletter"
-    fetch_method: "rss"
-    enabled: false
-    base_url: "https://tldr.tech/ai/"
-    feed_url: "https://tldr.tech/ai/feed/"
-    list_url: "https://tldr.tech/ai/"
-
-  anthropic_hf:
-    name: "Anthropic (Hugging Face)"
-    category: "official"
-    fetch_method: "huggingface"
-    enabled: false
-    base_url: "https://huggingface.co/anthropic"
-
-  thudm_hf:
-    name: "THUDM (Hugging Face)"
-    category: "chinese_official"
-    fetch_method: "huggingface"
-    enabled: false
-    base_url: "https://huggingface.co/THUDM"
+    base_url: "https://jra.k-ba.net/"
+    feed_url: "https://jra.k-ba.net/rss.rdf"

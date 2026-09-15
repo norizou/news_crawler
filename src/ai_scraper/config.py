@@ -110,6 +110,9 @@ class ReportConfig(BaseModel):
     wordcloud_width: int = Field(default=800, description="Word cloud width")
     wordcloud_height: int = Field(default=400, description="Word cloud height")
     ai_keywords_path: str = Field(default="config/ai_keywords.yaml", description="Path to AI keywords filter file")
+    sudachi_config_path: str = Field(
+        default="config/sudachi.json", description="Path to Sudachi config JSON (user dictionaries)"
+    )
 
 
 class AppConfig(BaseModel):

@@ -126,7 +126,10 @@ def generate_markdown_report(
         assets_dir = Path(output_path).parent / f"{Path(output_path).stem}_{cfg.output_assets_name}"
         assets_dir.mkdir(parents=True, exist_ok=True)
         
-        analyzer = TextAnalyzer(keywords_path=cfg.ai_keywords_path)
+        analyzer = TextAnalyzer(
+            keywords_path=cfg.ai_keywords_path,
+            sudachi_config_path=cfg.sudachi_config_path,
+        )
         viz = VisualizationGenerator(font_path=cfg.japanese_font_path)
         
         # Japanese analysis
