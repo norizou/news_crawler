@@ -1,13 +1,14 @@
 """Tests for Markdown report generation."""
 
-import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from ai_scraper.database import Database
-from ai_scraper.models import Article, FetchMethod, SourceConfig
-from ai_scraper.reporting import generate_markdown_report
-from ai_scraper.config import ReportConfig
+import pytest
+
+from news_crawler.config import ReportConfig
+from news_crawler.database import Database
+from news_crawler.models import Article, FetchMethod, SourceConfig
+from news_crawler.reporting import generate_markdown_report
 
 
 def test_generate_markdown_report(tmp_path: Path):
@@ -49,27 +50,27 @@ def test_generate_markdown_report(tmp_path: Path):
 
 
 def test_resolve_report_period():
-    from ai_scraper.reporting import resolve_report_period
+    from news_crawler.reporting import resolve_report_period
     now = datetime(2026, 9, 14, 12, 0, 0)
-    
+
     # Days
     start, end, mode = resolve_report_period(days=7, base_now=now)
     assert mode == "days"
     assert start == now - timedelta(days=7)
     assert end == now
-    
+
     # Date range
     start, end, mode = resolve_report_period(start_date="2026-09-01", end_date="2026-09-05", base_now=now)
     assert mode == "date_range"
     assert start == datetime(2026, 9, 1)
     assert end == datetime(2026, 9, 6) # Exclusive end
-    
+
     # Period
     start, end, mode = resolve_report_period(period="month", base_now=now)
     assert mode == "month"
     assert start == now - timedelta(days=30)
     assert end == now
-    
+
     # Conflicts
     with pytest.raises(ValueError):
         resolve_report_period(days=7, period="week")
@@ -78,7 +79,7 @@ def test_resolve_report_period():
 def test_generate_markdown_report_with_visualization(tmp_path):
     db_file = tmp_path / "test.db"
     db = Database(db_file)
-    
+
     source = SourceConfig(
         key="test",
         name="Test",
@@ -87,7 +88,7 @@ def test_generate_markdown_report_with_visualization(tmp_path):
         base_url="https://example.com",
     )
     db.upsert_source(source)
-    
+
     # Create a test keywords file with relevant terms
     keywords_file = tmp_path / "test_keywords.yaml"
     keywords_file.write_text("""
@@ -108,7 +109,7 @@ stopwords_general:
   - full
   - about
 """, encoding="utf-8")
-    
+
     art = Article(
         source_key="test",
         url="https://example.com/1",
@@ -120,7 +121,7 @@ stopwords_general:
         category="general",
     )
     saved_art, _, _ = db.upsert_article(art)
-    
+
     db.save_ai_result(
         article_id=saved_art.id,
         title_ja="GPT-4と大規模言語モデル",
@@ -129,28 +130,28 @@ stopwords_general:
         prompt_version="1",
         input_hash="hash"
     )
-    
+
     report_file = tmp_path / "report.md"
     cfg = ReportConfig(visualize=True, ai_keywords_path=str(keywords_file))
-    
+
     md = generate_markdown_report(
         db,
         days=1,
         output_path=report_file,
         report_config=cfg
     )
-    
+
     assert "## 📈 単語頻度分析" in md
     assert "### 日本語ワードクラウド" in md
     assert "![日本語ワードクラウド](report_assets/wordcloud_ja.png)" in md
     assert "### 原文ワードクラウド" in md
-    
+
     # Check assets directory
     assets_dir = tmp_path / "report_assets"
     assert assets_dir.exists()
     assert (assets_dir / "wordcloud_ja.png").exists()
     assert (assets_dir / "wordcloud_original.png").exists()
-    
+
     # Check Frontmatter
     import yaml
     parts = md.split("---")

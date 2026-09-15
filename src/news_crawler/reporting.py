@@ -1,31 +1,31 @@
 """Markdown report generator with word frequency visualization."""
 
-import yaml
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
 
-from ai_scraper.database import Database
-from ai_scraper.models import Article
-from ai_scraper.text_analyzer import TextAnalyzer
-from ai_scraper.visualization import VisualizationGenerator
-from ai_scraper.config import ReportConfig
+import yaml
+
+from news_crawler.config import ReportConfig
+from news_crawler.database import Database
+from news_crawler.models import Article
+from news_crawler.text_analyzer import TextAnalyzer
+from news_crawler.visualization import VisualizationGenerator
 
 
 def resolve_report_period(
-    days: Optional[int] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    period: Optional[str] = None,
-    base_now: Optional[datetime] = None
-) -> Tuple[datetime, datetime, str]:
+    days: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    period: str | None = None,
+    base_now: datetime | None = None
+) -> tuple[datetime, datetime, str]:
     """
     Resolve start and end datetimes based on provided criteria.
     Returns (start_at, end_at, mode).
     """
     now = base_now or datetime.now()
-    
+
     # Check for conflicts
     specified = [x for x in [days is not None, start_date is not None, period is not None] if x]
     if len(specified) > 1:
@@ -41,7 +41,7 @@ def resolve_report_period(
                 end_at = datetime.fromisoformat(end_date) + timedelta(days=1)
             else:
                 end_at = now
-            
+
             if start_at > end_at:
                 raise ValueError("start-date must be before end-date.")
             return start_at, end_at, "date_range"
@@ -70,21 +70,21 @@ def resolve_report_period(
 
 def generate_markdown_report(
     db: Database,
-    days: Optional[int] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    period: Optional[str] = None,
-    category: Optional[str] = None,
-    output_path: Optional[str | Path] = None,
-    report_config: Optional[ReportConfig] = None,
+    days: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    period: str | None = None,
+    category: str | None = None,
+    output_path: str | Path | None = None,
+    report_config: ReportConfig | None = None,
 ) -> str:
     """Generate a structured Markdown report of articles with visualizations."""
     cfg = report_config or ReportConfig()
-    
+
     start_at, end_at, mode = resolve_report_period(days, start_date, end_date, period)
-    
+
     articles = db.get_articles_in_range(start_at, end_at, category=category)
-    
+
     # Group by category and source
     by_category: dict[str, dict[str, list[Article]]] = defaultdict(lambda: defaultdict(list))
     for art in articles:
@@ -107,7 +107,7 @@ def generate_markdown_report(
         "period_start": start_at.strftime("%Y-%m-%d"),
         "period_end": (end_at - timedelta(seconds=1)).strftime("%Y-%m-%d"),
     }
-    
+
     lines.append("---")
     lines.append(yaml.dump(frontmatter, allow_unicode=True, sort_keys=False).strip())
     lines.append("---")
@@ -122,17 +122,17 @@ def generate_markdown_report(
     if cfg.visualize and output_path and articles:
         lines.append("## 📈 単語頻度分析")
         lines.append("")
-        
+
         assets_dir = Path(output_path).parent / f"{Path(output_path).stem}_{cfg.output_assets_name}"
         assets_dir.mkdir(parents=True, exist_ok=True)
-        
+
         analyzer = TextAnalyzer(keywords_path=cfg.ai_keywords_path)
         viz = VisualizationGenerator(font_path=cfg.japanese_font_path)
-        
+
         # Japanese analysis
         ja_texts = [
-            f"{a.title_ja} {a.summary_ja}" 
-            for a in articles 
+            f"{a.title_ja} {a.summary_ja}"
+            for a in articles
             if a.ai_status == "completed" and (a.title_ja or a.summary_ja)
         ]
         if ja_texts:
@@ -140,12 +140,12 @@ def generate_markdown_report(
             if ja_freq:
                 wc_path = assets_dir / "wordcloud_ja.png"
                 pie_path = assets_dir / "frequency_ja.png"
-                
+
                 if viz.generate_wordcloud(ja_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height):
                     lines.append("### 日本語ワードクラウド")
                     lines.append(f"![日本語ワードクラウド]({assets_dir.name}/{wc_path.name})")
                     lines.append("")
-                
+
                 if viz.generate_pie_chart(ja_freq, pie_path, top_n=cfg.top_n, title="日本語頻出単語 (Top N)"):
                     lines.append(f"### 日本語 Top {cfg.top_n} 単語分布")
                     lines.append(f"![日本語単語頻度パイチャート]({assets_dir.name}/{pie_path.name})")
@@ -161,12 +161,12 @@ def generate_markdown_report(
         if en_freq:
             wc_path = assets_dir / "wordcloud_original.png"
             pie_path = assets_dir / "frequency_original.png"
-            
+
             if viz.generate_wordcloud(en_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height):
                 lines.append("### 原文ワードクラウド")
                 lines.append(f"![原文ワードクラウド]({assets_dir.name}/{wc_path.name})")
                 lines.append("")
-            
+
             if viz.generate_pie_chart(en_freq, pie_path, top_n=cfg.top_n, title="原文頻出単語 (Top N)"):
                 lines.append(f"### 原文 Top {cfg.top_n} 単語分布")
                 lines.append(f"![原文単語頻度パイチャート]({assets_dir.name}/{pie_path.name})")

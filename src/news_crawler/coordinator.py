@@ -6,15 +6,15 @@ from datetime import datetime
 
 from rich.console import Console
 
-from ai_scraper.adapters.base import BaseAdapter
-from ai_scraper.adapters.github import GitHubAdapter
-from ai_scraper.adapters.html import HTMLAdapter
-from ai_scraper.adapters.huggingface import HuggingFaceAdapter
-from ai_scraper.adapters.playwright import PlaywrightAdapter
-from ai_scraper.adapters.rss import RSSAdapter
-from ai_scraper.config import AppConfig
-from ai_scraper.database import Database
-from ai_scraper.models import CrawlResult, CrawlRun, FetchMethod, SourceConfig
+from news_crawler.adapters.base import BaseAdapter
+from news_crawler.adapters.github import GitHubAdapter
+from news_crawler.adapters.html import HTMLAdapter
+from news_crawler.adapters.huggingface import HuggingFaceAdapter
+from news_crawler.adapters.playwright import PlaywrightAdapter
+from news_crawler.adapters.rss import RSSAdapter
+from news_crawler.config import AppConfig
+from news_crawler.database import Database
+from news_crawler.models import CrawlResult, CrawlRun, FetchMethod, SourceConfig
 
 console = Console()
 

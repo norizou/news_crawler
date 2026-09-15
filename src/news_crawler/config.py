@@ -7,7 +7,7 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 
-from ai_scraper.models import SourceConfig
+from news_crawler.models import SourceConfig
 
 # Load environment variables from .env file
 load_dotenv()
@@ -36,7 +36,7 @@ class CrawlerConfig(BaseModel):
     download_delay: float = Field(default=2.0, description="Delay between requests in seconds")
     concurrent_requests: int = Field(default=4, description="Max concurrent requests")
     user_agent: str = Field(
-        default="AI-Scraper/1.0 (+https://gitlab.dell.com/asain/ai_scraper)",
+        default="News-Crawler/1.0 (+https://gitlab.dell.com/asain/news_crawler)",
         description="User-Agent string",
     )
     timeout_seconds: int = Field(default=30, description="HTTP request timeout")

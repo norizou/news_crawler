@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from ai_scraper.config import load_config
-from ai_scraper.models import FetchMethod
+from news_crawler.config import load_config
+from news_crawler.models import FetchMethod
 
 
 def test_load_config_default(tmp_path: Path):

@@ -1,7 +1,7 @@
 {
-  "name": "ai_scraper",
+  "name": "news_crawler",
   "version": "1.0.0",
-  "description": "AI情報収集・週次トレンドスクレイピングシステム",
+  "description": "AI情報収集・週次トレンドスクレイピング・クロールシステム",
   "private": true,
   "scripts": {
     "lint": "npm run lint:markdown && npm run lint:textlint",

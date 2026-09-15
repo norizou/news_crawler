@@ -21,7 +21,7 @@ status: completed
 
 ## 1. プロジェクト概要と設計方針
 
-本プロジェクト（`ai_scraper`）は、急速に進化するAI技術および市場動向の情報を効率的かつ持続的に収集することを目的としています。
+本プロジェクト（`news_crawler`）は、急速に進化するAI技術および市場動向の情報を効率的かつ持続的に収集することを目的としています。
 
 ### 設計の基本方針
 
@@ -178,7 +178,7 @@ erDiagram
 ### 3.1 ディレクトリ構成と役割
 
 ```text
-ai_scraper/
+news_crawler/
 ├── pyproject.toml              # uv パッケージ設定・CLI 定義
 ├── uv.lock                     # 依存バージョン完全固定ロック
 ├── package.json                # npm スクリプト・Markdown Lint 設定
@@ -196,7 +196,7 @@ ai_scraper/
 │   ├── sources.example.yaml    # ソース設定テンプレート
 │   └── sources.yaml            # 実運用ソース設定
 ├── src/
-│   └── ai_scraper/
+│   └── news_crawler/
 │       ├── __init__.py         # パッケージ初期化
 │       ├── cli.py              # Click + Rich による CLI インターフェース
 │       ├── config.py           # YAML 設定ローダーおよび Pydantic バリデーター
@@ -241,7 +241,7 @@ ai_scraper/
 - AI 処理ステータス（`pending`, `completed`, `failed`）、入力ハッシュ、モデル名、プロンプト版の柔軟な状態管理と後方互換スキーマ移行を提供。
 
 #### 3. AI 翻訳・要約プロセッサ (`ai_processor.py`)
-- **原文保存後の処理**: スクレイピング完了後に別フェーズ（`ai-scraper enrich`）として実行。AI障害が発生しても収集済み原文を失わない安全設計。
+- **原文保存後の処理**: スクレイピング完了後に別フェーズ（`news-crawler enrich`）として実行。AI障害が発生しても収集済み原文を失わない安全設計。
 - **シングルリクエスト処理**: 1回の API コールで日本語タイトルと日本語要約（2〜3文）を同時生成。
 - **差分処理 & 冪等性**: 本文・タイトルのハッシュ値に基づき、新規・更新記事のみを対象として重複 API 呼び出しを防止。
 - **レート制限 & バックオフ**: リクエスト間隔の制御、429 エラー時の `Retry-After` ヘッダー待機、指数バックオフを実装。
@@ -415,32 +415,32 @@ Hugging Faceから取得する情報は、各提供元アカウントが公開�
 ### 5.1 CLI コマンドリファレンス
 
 ```bash
-cd ~/dev/ai_scraper
+cd ~/dev/news_crawler
 
 # 1. ソース一覧の確認
-uv run ai-scraper list-sources
+uv run news-crawler list-sources
 
 # 2. クロールの実行 (全ソース)
-uv run ai-scraper crawl
+uv run news-crawler crawl
 
 # 3. 特定ソースのみクロール
-uv run ai-scraper crawl --source openai
+uv run news-crawler crawl --source openai
 
 # 4. dry-run (DB書き込みなしのテスト実行)
-uv run ai-scraper crawl --dry-run
+uv run news-crawler crawl --dry-run
 
 # 5. 週次Markdownレポート生成 (直近7日間)
-uv run ai-scraper report
+uv run news-crawler report
 
 # 6. 期間指定レポート生成 (直近14日間)
-uv run ai-scraper report --days 14 --output output/report_2weeks.md
+uv run news-crawler report --days 14 --output output/report_2weeks.md
 
 # 7. FTS5 全文検索
-uv run ai-scraper search "Transformer"
-uv run ai-scraper search "Agent" --category official
+uv run news-crawler search "Transformer"
+uv run news-crawler search "Agent" --category official
 
 # 8. データベース統計確認
-uv run ai-scraper stats
+uv run news-crawler stats
 ```
 
 ### 5.2 新規情報ソースの追加手順
@@ -480,8 +480,8 @@ sources:
 Hugging Faceアダプターのテストでは、`modelId` がない不正な要素をスキップしながら、正常なモデルを失わないことも確認します。実APIの疎通、社内ネットワークからの到達性、レスポンス仕様の変化は、次のdry-runを手動または定期的な疎通ジョブで確認します。
 
 ```bash
-uv run ai-scraper crawl --source deepseek_hf --dry-run
-uv run ai-scraper crawl --source qwen_hf --dry-run
+uv run news-crawler crawl --source deepseek_hf --dry-run
+uv run news-crawler crawl --source qwen_hf --dry-run
 ```
 
 ### 5.4 テストとコード品質の検証

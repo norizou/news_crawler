@@ -1,6 +1,6 @@
-# AI Scraper (ai_scraper)
+# News Crawler (news_crawler)
 
-An automated scraping system for regularly collecting, translating, summarizing, and reporting the latest AI trends and technical developments.
+An automated crawling system for regularly collecting, translating, summarizing, and reporting the latest AI trends and technical developments.
 
 ---
 
@@ -64,7 +64,7 @@ graph TD
 ### 1. Clone Repository and Install Dependencies
 
 ```bash
-cd ~/dev/ai_scraper
+cd ~/dev/news_crawler
 
 # Sync Python dependencies
 uv sync
@@ -89,13 +89,13 @@ cp config/sources.example.yaml config/sources.yaml
 
 ```bash
 # Crawl all enabled sources
-uv run ai-scraper crawl
+uv run news-crawler crawl
 
 # Crawl specific source only
-uv run ai-scraper crawl --source openai
+uv run news-crawler crawl --source openai
 
 # dry-run (fetch verification without DB persistence)
-uv run ai-scraper crawl --dry-run
+uv run news-crawler crawl --dry-run
 ```
 
 ### Current Sources (18 enabled + 12 disabled = 30 sites)
@@ -110,7 +110,7 @@ uv run ai-scraper crawl --dry-run
 
 ### Disabled Sources (Access Restricted or No RSS Feed)
 
-The following sites are disabled due to access restrictions, missing RSS feeds, or SSL certificate errors. See <ref_file file="/home/asain/dev/ai_scraper/Idea_memo.md" /> for details.
+The following sites are disabled due to access restrictions, missing RSS feeds, or SSL certificate errors. See `Idea_memo.md` for details.
 
 - VentureBeat (AI)
 - Wired (AI)
@@ -144,8 +144,8 @@ sources:
 ```
 
 ```bash
-uv run ai-scraper crawl --source deepseek_hf
-uv run ai-scraper crawl --source qwen_hf
+uv run news-crawler crawl --source deepseek_hf
+uv run news-crawler crawl --source qwen_hf
 ```
 
 ### AI Translation & Summarization (Optional)
@@ -154,10 +154,10 @@ Use AIA Proxy to translate and summarize collected English articles to Japanese.
 
 ```bash
 # Enable AI translation/summarization (set ai.enabled: true in config/crawler.yaml)
-uv run ai-scraper enrich --days 7 --limit 50
+uv run news-crawler enrich --days 7 --limit 50
 
 # Retry failed articles
-uv run ai-scraper enrich --days 7 --retry-failed
+uv run news-crawler enrich --days 7 --retry-failed
 ```
 
 AI processing features:
@@ -175,19 +175,19 @@ Generates a Markdown report from collected articles. Visualization with word clo
 
 ```bash
 # Generate weekly report for last 7 days (with visualization)
-uv run ai-scraper report
+uv run news-crawler report
 
 # Custom period (e.g., last 30 days, Top 15 words)
-uv run ai-scraper report --days 30 --top-n 15
+uv run news-crawler report --days 30 --top-n 15
 
 # Date range specification
-uv run ai-scraper report --start-date 2026-09-01 --end-date 2026-09-14
+uv run news-crawler report --start-date 2026-09-01 --end-date 2026-09-14
 
 # Predefined periods (week/month/quarter)
-uv run ai-scraper report --period month
+uv run news-crawler report --period month
 
 # Generate text-only report without visualization
-uv run ai-scraper report --no-visualize
+uv run news-crawler report --no-visualize
 ```
 
 Report visualization features:
@@ -201,24 +201,24 @@ Report visualization features:
 
 ```bash
 # Keyword search (English and Japanese supported)
-uv run ai-scraper search "Claude 3.7"
-uv run ai-scraper search "AIモデル"
+uv run news-crawler search "Claude 3.7"
+uv run news-crawler search "AIモデル"
 
 # Category-filtered search
-uv run ai-scraper search "Agent" --category official
+uv run news-crawler search "Agent" --category official
 ```
 
 ### Source List Verification
 
 ```bash
-uv run ai-scraper list-sources
+uv run news-crawler list-sources
 ```
 
 ### Database Statistics
 
 ```bash
 # View database statistics including AI processing status
-uv run ai-scraper stats
+uv run news-crawler stats
 ```
 
 ---
@@ -253,8 +253,8 @@ npm run lint:fix
 ## Project Structure
 
 ```text
-ai_scraper/
-├── src/ai_scraper/
+news_crawler/
+├── src/news_crawler/
 │   ├── adapters/          # Source-specific fetch adapters
 │   ├── ai_processor.py    # AI enrichment processor
 │   ├── cli.py             # Command-line interface
@@ -264,6 +264,8 @@ ai_scraper/
 │   ├── models.py          # Data models
 │   ├── normalizer.py      # URL/content normalization
 │   ├── reporting.py       # Markdown report generator
+│   ├── text_analyzer.py   # Morphological analysis & keyword extraction
+│   ├── visualization.py   # Word cloud & chart generation
 │   └── utils.py           # Utility functions
 ├── config/
 │   ├── crawler.yaml        # Crawler & AI configuration

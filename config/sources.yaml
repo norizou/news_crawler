@@ -198,8 +198,9 @@ sources:
     name: "ITmedia AI+"
     category: "domestic"
     fetch_method: "rss"
-    enabled: false
+    enabled: true
     base_url: "https://www.itmedia.co.jp/aiplus/"
+    feed_url: "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml"
     list_url: "https://www.itmedia.co.jp/aiplus/"
 
   ai_market:
@@ -214,20 +215,41 @@ sources:
   ai_souken:
     name: "AI総研"
     category: "domestic"
+    fetch_method: "html"
+    enabled: true
+    base_url: "https://www.ai-souken.com/"
+    list_url: "https://www.ai-souken.com/news/"
+    article_list_selector: "a[href*='/news/']"
+    title_selector: "h1"
+    content_selector: "article"
+    date_selector: "time"
+
+  ai_insight:
+    name: "AIインサイト"
+    category: "domestic"
     fetch_method: "rss"
-    enabled: false
-    base_url: "https://metaversesouken.com/ai/generative_ai/media/"
-    feed_url: "https://metaversesouken.com/ai/generative_ai/media/feed/"
-    list_url: "https://metaversesouken.com/ai/generative_ai/media/"
+    enabled: true
+    base_url: "https://ai-insight.jp/"
+    feed_url: "https://ai-insight.jp/feed/"
+    list_url: "https://ai-insight.jp/news/"
+
+  aisokuho:
+    name: "AI速報ドットコム"
+    category: "domestic"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://aisokuho.com/"
+    feed_url: "https://aisokuho.com/feed/"
+    list_url: "https://aisokuho.com/"
 
   zdnet_japan:
     name: "ZDNET Japan (AI)"
     category: "domestic"
     fetch_method: "rss"
-    enabled: false
-    base_url: "https://japan.zdnet.com/topic/ai/"
-    feed_url: "https://japan.zdnet.com/topic/ai/feed/"
-    list_url: "https://japan.zdnet.com/topic/ai/"
+    enabled: true
+    base_url: "https://japan.zdnet.com/"
+    feed_url: "https://feeds.japan.zdnet.com/rss/zdnet/all.rdf"
+    list_url: "https://japan.zdnet.com/"
 
   the_rundown_ai:
     name: "The Rundown AI"
