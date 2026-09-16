@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from ai_scraper.models import Article, CrawlRun, SearchResult, SourceConfig
-from ai_scraper.normalizer import compute_content_hash, normalize_url
+from news_crawler.models import Article, CrawlRun, SearchResult, SourceConfig
+from news_crawler.normalizer import compute_content_hash, normalize_url
 
 
 class Database:

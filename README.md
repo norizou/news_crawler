@@ -1,4 +1,4 @@
-# AI Scraper (ai_scraper)
+# AI Scraper (news_crawler)
 
 AI最新トレンド・技術動向を定期的に自動収集・翻訳・要約・レポート化するスクレイピングシステムです。
 
@@ -61,7 +61,7 @@ graph TD
 ### 1. リポジトリのクローンと依存関係インストール
 
 ```bash
-cd ~/dev/ai_scraper
+cd ~/dev/news_crawler
 
 # Python 依存関係の同期
 uv sync
@@ -86,13 +86,13 @@ cp config/sources.example.yaml config/sources.yaml
 
 ```bash
 # 全ソースのクロール実行
-uv run ai-scraper crawl
+uv run news-crawler crawl
 
 # 特定ソースのみクロール
-uv run ai-scraper crawl --source openai
+uv run news-crawler crawl --source openai
 
 # dry-run（DB保存なしで取得確認）
-uv run ai-scraper crawl --dry-run
+uv run news-crawler crawl --dry-run
 ```
 
 ### 現在のソース一覧（18有効 + 12無効 = 30サイト）
@@ -107,7 +107,7 @@ uv run ai-scraper crawl --dry-run
 
 ### 無効ソース（アクセス不可またはRSSフィードなし）
 
-以下のサイトはアクセス制限、RSSフィードの不在、またはSSL証明書エラーにより無効化されています。詳細は <ref_file file="/home/asain/dev/ai_scraper/Idea_memo.md" /> を参照してください。
+以下のサイトはアクセス制限、RSSフィードの不在、またはSSL証明書エラーにより無効化されています。詳細は <ref_file file="/home/asain/dev/news_crawler/Idea_memo.md" /> を参照してください。
 
 - VentureBeat (AI)
 - Wired (AI)
@@ -141,8 +141,8 @@ sources:
 ```
 
 ```bash
-uv run ai-scraper crawl --source deepseek_hf
-uv run ai-scraper crawl --source qwen_hf
+uv run news-crawler crawl --source deepseek_hf
+uv run news-crawler crawl --source qwen_hf
 ```
 
 ### AI翻訳・要約（オプション）
@@ -151,10 +151,10 @@ AIA Proxyを利用して、収集した英文記事を日本語に翻訳・要�
 
 ```bash
 # AI翻訳・要約を有効化（config/crawler.yamlでai.enabled: true）
-uv run ai-scraper enrich --days 7 --limit 50
+uv run news-crawler enrich --days 7 --limit 50
 
 # 失敗した記事を再試行
-uv run ai-scraper enrich --days 7 --retry-failed
+uv run news-crawler enrich --days 7 --retry-failed
 ```
 
 AI処理には以下の特徴があります。
@@ -172,19 +172,19 @@ AI処理には以下の特徴があります。
 
 ```bash
 # 直近7日間の週次レポートを生成（可視化あり）
-uv run ai-scraper report
+uv run news-crawler report
 
 # 期間指定（例: 直近30日間、Top 15単語）
-uv run ai-scraper report --days 30 --top-n 15
+uv run news-crawler report --days 30 --top-n 15
 
 # 日付範囲指定
-uv run ai-scraper report --start-date 2026-09-01 --end-date 2026-09-14
+uv run news-crawler report --start-date 2026-09-01 --end-date 2026-09-14
 
 # 定義済み期間（week/month/quarter）
-uv run ai-scraper report --period month
+uv run news-crawler report --period month
 
 # 可視化なしでテキストのみのレポートを生成
-uv run ai-scraper report --no-visualize
+uv run news-crawler report --no-visualize
 ```
 
 レポートの可視化には以下の特徴があります。
@@ -198,17 +198,17 @@ uv run ai-scraper report --no-visualize
 
 ```bash
 # キーワード検索（英文・日本語両対応）
-uv run ai-scraper search "Claude 3.7"
-uv run ai-scraper search "AIモデル"
+uv run news-crawler search "Claude 3.7"
+uv run news-crawler search "AIモデル"
 
 # カテゴリ絞り込み検索
-uv run ai-scraper search "Agent" --category official
+uv run news-crawler search "Agent" --category official
 ```
 
 ### ソース一覧の確認
 
 ```bash
-uv run ai-scraper list-sources
+uv run news-crawler list-sources
 ```
 
 ---
@@ -245,7 +245,7 @@ uv run pytest tests/test_adapters.py tests/test_config.py
 ## ディレクトリ構成
 
 ```text
-ai_scraper/
+news_crawler/
 ├── pyproject.toml              # Python プロジェクト定義 (uv)
 ├── uv.lock                     # 依存バージョン固定ロックファイル
 ├── package.json                # npm スクリプト・Lint 定義
@@ -261,7 +261,7 @@ ai_scraper/
 │   ├── sources.yaml            # 実運用ソース設定 (gitignore対象可)
 │   └── crawler.yaml            # クローラー共通設定 (レート制限等)
 ├── src/
-│   └── ai_scraper/
+│   └── news_crawler/
 │       ├── __init__.py
 │       ├── ai_processor.py     # AI翻訳・要約プロセッサー
 │       ├── cli.py              # CLI エントリポイント

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from ai_scraper.database import Database
-from ai_scraper.models import Article, CrawlResult, CrawlRun, FetchMethod, SourceConfig
+from news_crawler.database import Database
+from news_crawler.models import Article, CrawlResult, CrawlRun, FetchMethod, SourceConfig
 
 
 @pytest.fixture
@@ -257,9 +257,9 @@ def test_ai_status_unchanged_content_preserved(temp_db: Database, sample_source:
 def test_get_articles_in_range(temp_db: Database, sample_source: SourceConfig):
     """Test retrieving articles within a date range."""
     temp_db.upsert_source(sample_source)
-    
+
     base_time = datetime(2026, 9, 10, 12, 0)
-    
+
     # 1. Old article
     art1 = Article(
         source_key="test_source",
@@ -287,22 +287,26 @@ def test_get_articles_in_range(temp_db: Database, sample_source: SourceConfig):
         published_at=base_time + timedelta(days=5),
         category="official",
     )
-    
+
     temp_db.upsert_article(art1)
     temp_db.upsert_article(art2)
     temp_db.upsert_article(art3)
-    
+
     # Range: base_time to base_time + 1 day
     results = temp_db.get_articles_in_range(base_time, base_time + timedelta(days=1))
     assert len(results) == 1
     assert results[0].title == "In Range"
-    
+
     # Range including old
-    results = temp_db.get_articles_in_range(base_time - timedelta(days=10), base_time + timedelta(days=1))
+    results = temp_db.get_articles_in_range(
+        base_time - timedelta(days=10), base_time + timedelta(days=1)
+    )
     assert len(results) == 2
-    
+
     # Category filter
-    results = temp_db.get_articles_in_range(base_time - timedelta(days=10), base_time + timedelta(days=10), category="media")
+    results = temp_db.get_articles_in_range(
+        base_time - timedelta(days=10), base_time + timedelta(days=10), category="media"
+    )
     assert len(results) == 0
 
 

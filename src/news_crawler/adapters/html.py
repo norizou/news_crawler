@@ -7,10 +7,10 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
-from ai_scraper.adapters.base import BaseAdapter
-from ai_scraper.models import Article
-from ai_scraper.normalizer import clean_text, compute_content_hash, normalize_url, parse_datetime
-from ai_scraper.utils import get_ssl_verify
+from news_crawler.adapters.base import BaseAdapter
+from news_crawler.models import Article
+from news_crawler.normalizer import clean_text, compute_content_hash, normalize_url, parse_datetime
+from news_crawler.utils import get_ssl_verify
 
 
 class HTMLAdapter(BaseAdapter):

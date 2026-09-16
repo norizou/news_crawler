@@ -7,19 +7,19 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from ai_scraper.ai_processor import AIProcessor
-from ai_scraper.config import load_config
-from ai_scraper.coordinator import CrawlCoordinator
-from ai_scraper.database import Database
-from ai_scraper.reporting import generate_markdown_report
+from news_crawler.ai_processor import AIProcessor
+from news_crawler.config import load_config
+from news_crawler.coordinator import CrawlCoordinator
+from news_crawler.database import Database
+from news_crawler.reporting import generate_markdown_report
 
 console = Console()
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="ai-scraper")
+@click.version_option(version="0.1.0", prog_name="news-crawler")
 def main() -> None:
-    """AI Trend & Tech News Scraping System CLI."""
+    """News Scraping System CLI."""
 
 
 @main.command()

@@ -7,7 +7,7 @@ import pytest
 import respx
 from click.testing import CliRunner
 
-from ai_scraper.cli import main
+from news_crawler.cli import main
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -82,18 +82,36 @@ def test_cli_crawl_and_search_and_report(cli_config_dir: Path):
 def test_cli_report_period_options(cli_config_dir: Path):
     """Test various period options for report command."""
     runner = CliRunner()
-    
+
     # 1. Period month
     res = runner.invoke(main, ["report", "--period", "month", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 0
     assert "Report generated successfully" in res.output
-    
+
     # 2. Date range
-    res = runner.invoke(main, ["report", "--start-date", "2026-09-01", "--end-date", "2026-09-10", "--config-dir", str(cli_config_dir)])
+    args = [
+        "report",
+        "--start-date",
+        "2026-09-01",
+        "--end-date",
+        "2026-09-10",
+        "--config-dir",
+        str(cli_config_dir),
+    ]
+    res = runner.invoke(main, args)
     assert res.exit_code == 0
-    
+
     # 3. Conflict (days and period)
-    res = runner.invoke(main, ["report", "--days", "7", "--period", "week", "--config-dir", str(cli_config_dir)])
+    args_conflict = [
+        "report",
+        "--days",
+        "7",
+        "--period",
+        "week",
+        "--config-dir",
+        str(cli_config_dir),
+    ]
+    res = runner.invoke(main, args_conflict)
     assert res.exit_code == 1
     assert "Error" in res.output
 
@@ -101,15 +119,15 @@ def test_cli_report_period_options(cli_config_dir: Path):
 def test_cli_report_visualize_options(cli_config_dir: Path):
     """Test visualization options for report command."""
     runner = CliRunner()
-    
+
     # 1. No visualize
     res = runner.invoke(main, ["report", "--no-visualize", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 0
-    
+
     # 2. Top-n
     res = runner.invoke(main, ["report", "--top-n", "15", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 0
-    
+
     # 3. Invalid top-n (out of range)
     res = runner.invoke(main, ["report", "--top-n", "5", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 2 # Click usage error

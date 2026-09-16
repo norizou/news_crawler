@@ -1,8 +1,7 @@
 """Tests for text analyzer using SudachiPy."""
 
-import pytest
-from collections import Counter
-from ai_scraper.text_analyzer import TextAnalyzer
+from news_crawler.text_analyzer import TextAnalyzer
+
 
 def test_analyze_japanese():
     analyzer = TextAnalyzer()
@@ -10,9 +9,9 @@ def test_analyze_japanese():
         "最新のAI技術について調査しました。",
         "新しいAIモデルがリリースされました。非常に強力です。"
     ]
-    
+
     counter = analyzer.analyze_japanese(texts)
-    
+
     # Check if some expected words are present
     assert counter["最新"] >= 1
     assert counter["技術"] >= 1
@@ -20,13 +19,14 @@ def test_analyze_japanese():
     assert counter["新しい"] >= 1
     assert counter["モデル"] >= 1
     assert counter["リリース"] >= 1
-    
+
     # Check if stopwords are removed
     assert "について" not in counter
     assert "の" not in counter
     assert "が" not in counter
     assert "ました" not in counter
-    assert "非常に" not in counter  # This might be an adverb/形状詞 depending on dict, but usually we want to filter common filler
+    # This might be an adverb/形状詞 depending on dict, but usually filter common filler
+    assert "非常に" not in counter
 
 def test_analyze_japanese_with_keywords_filter(tmp_path):
     # Create a test keywords file
@@ -40,20 +40,20 @@ stopwords_general:
   - 新しい
   - 最新
 """, encoding="utf-8")
-    
+
     analyzer = TextAnalyzer(keywords_path=str(keywords_file))
     texts = [
         "最新の人工知能技術について調査しました。",
         "新しい人工知能モデルがリリースされました。非常に強力です。"
     ]
-    
+
     counter = analyzer.analyze_japanese(texts)
-    
+
     # Only AI keywords should be present
     assert "人工知能" in counter
     assert "モデル" in counter
     assert "技術" in counter
-    
+
     # Filtered words should not be present
     assert "新しい" not in counter
     assert "最新" not in counter
@@ -64,7 +64,7 @@ def test_analyze_japanese_lemma():
     analyzer = TextAnalyzer()
     texts = ["走る、走った、走れば。"]
     counter = analyzer.analyze_japanese(texts)
-    
+
     # All should be normalized to "走る" (dictionary form)
     assert counter["走る"] >= 3
 
@@ -74,9 +74,9 @@ def test_analyze_english():
         "New AI models are released by OpenAI.",
         "GPT-4 is a large language model."
     ]
-    
+
     counter = analyzer.analyze_english(texts)
-    
+
     assert counter["ai"] >= 1
     assert counter["models"] >= 1
     assert counter["released"] >= 1
@@ -85,7 +85,7 @@ def test_analyze_english():
     assert counter["large"] >= 1
     assert counter["language"] >= 1
     assert counter["model"] >= 1
-    
+
     # Stopwords
     assert "are" not in counter
     assert "by" not in counter
@@ -105,20 +105,20 @@ stopwords_general:
   - released
   - large
 """, encoding="utf-8")
-    
+
     analyzer = TextAnalyzer(keywords_path=str(keywords_file))
     texts = [
         "New AI models are released by OpenAI.",
         "GPT-4 is a large language model."
     ]
-    
+
     counter = analyzer.analyze_english(texts)
-    
+
     # Only AI keywords should be present
     assert "ai" in counter
     assert "gpt-4" in counter
     assert "model" in counter
-    
+
     # Filtered words should not be present
     assert "new" not in counter
     assert "released" not in counter

@@ -2,8 +2,8 @@
 
 from abc import ABC, abstractmethod
 
-from ai_scraper.config import CrawlerConfig
-from ai_scraper.models import Article, SourceConfig
+from news_crawler.config import CrawlerConfig
+from news_crawler.models import Article, SourceConfig
 
 
 class BaseAdapter(ABC):

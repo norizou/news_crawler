@@ -9,9 +9,9 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from ai_scraper.config import AIConfig
-from ai_scraper.database import Database
-from ai_scraper.models import AIResponse, Article
+from news_crawler.config import AIConfig
+from news_crawler.database import Database
+from news_crawler.models import AIResponse, Article
 
 
 class AIProcessor:
@@ -106,7 +106,7 @@ class AIProcessor:
 
     def _compute_input_hash(self, article: Article) -> str:
         """Compute hash of input data for change detection."""
-        from ai_scraper.normalizer import compute_content_hash
+        from news_crawler.normalizer import compute_content_hash
 
         return compute_content_hash(article.title, article.content)
 

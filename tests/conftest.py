@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from ai_scraper.config import AIConfig
-from ai_scraper.database import Database
-from ai_scraper.models import Article, FetchMethod, SourceConfig
+from news_crawler.config import AIConfig
+from news_crawler.database import Database
+from news_crawler.models import Article, FetchMethod, SourceConfig
 
 
 @pytest.fixture

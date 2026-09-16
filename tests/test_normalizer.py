@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from ai_scraper.normalizer import clean_text, compute_content_hash, normalize_url, parse_datetime
+from news_crawler.normalizer import clean_text, compute_content_hash, normalize_url, parse_datetime
 
 
 def test_normalize_url_strips_tracking_params():

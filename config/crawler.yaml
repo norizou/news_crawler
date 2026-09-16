@@ -1,7 +1,7 @@
 crawler:
   download_delay: 1.5
   concurrent_requests: 4
-  user_agent: "AI-Scraper/1.0 (+https://gitlab.dell.com/asain/ai_scraper)"
+  user_agent: "News-Crawler/1.0 (+https://gitlab.dell.com/asain/news_crawler)"
   timeout_seconds: 30
   retry_times: 3
   retry_http_codes:

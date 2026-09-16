@@ -6,11 +6,11 @@ import httpx
 import pytest
 import respx
 
-from ai_scraper.adapters.html import HTMLAdapter
-from ai_scraper.adapters.huggingface import HuggingFaceAdapter
-from ai_scraper.adapters.rss import RSSAdapter
-from ai_scraper.config import CrawlerConfig
-from ai_scraper.models import FetchMethod, SourceConfig
+from news_crawler.adapters.html import HTMLAdapter
+from news_crawler.adapters.huggingface import HuggingFaceAdapter
+from news_crawler.adapters.rss import RSSAdapter
+from news_crawler.config import CrawlerConfig
+from news_crawler.models import FetchMethod, SourceConfig
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

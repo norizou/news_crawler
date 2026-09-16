@@ -1,6 +1,6 @@
 # 貢献ガイドライン (Contributing Guide)
 
-`ai_scraper` への貢献（Issue 報告、機能提案、Pull/Merge Request）を歓迎します。
+`news_crawler` への貢献（Issue 報告、機能提案、Pull/Merge Request）を歓迎します。
 
 ---
 
@@ -9,8 +9,8 @@
 1. **リポジトリのクローン**:
 
    ```bash
-   git clone <repository_url> ai_scraper
-   cd ai_scraper
+   git clone <repository_url> news_crawler
+   cd news_crawler
    ```
 
 2. **依存関係のインストール**:
