@@ -125,3 +125,59 @@ stopwords_general:
     assert "large" not in counter
     assert "openai" not in counter  # Not in whitelist
     assert "language" not in counter  # Not in whitelist
+
+
+def _write_crowns(tmp_path, rows):
+    path = tmp_path / "crowns.csv"
+    lines = ["position,crown,db_horse_count"] + rows
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def test_crowns_prefix_and_suffix_extraction(tmp_path):
+    crowns = _write_crowns(tmp_path, ["prefix,メイショウ,100", "suffix,テソーロ,50"])
+    analyzer = TextAnalyzer(crowns_path=crowns)
+    counter = analyzer.analyze_japanese(["メイショウホゲピヨ"])
+    assert counter["メイショウ"] == 1
+    counter = analyzer.analyze_japanese(["ホゲピヨテソーロ"])
+    assert counter["テソーロ"] == 1
+
+
+def test_crowns_longest_match_wins(tmp_path):
+    crowns = _write_crowns(tmp_path, ["prefix,マイネ,10", "prefix,マイネル,10"])
+    analyzer = TextAnalyzer(crowns_path=crowns)
+    counter = analyzer.analyze_japanese(["マイネルホゲ"])
+    assert counter["マイネル"] == 1
+    assert counter["マイネ"] == 0
+
+
+def test_crowns_same_crown_both_positions_counts_once(tmp_path):
+    crowns = _write_crowns(tmp_path, ["prefix,ゴールド,10", "suffix,ゴールド,10"])
+    analyzer = TextAnalyzer(crowns_path=crowns)
+    counter = analyzer.analyze_japanese(["ゴールドホゲゴールド"])
+    # 同一ラン内で prefix/suffix の両方に一致しても1回のみ
+    assert counter["ゴールド"] == 1
+
+
+def test_crowns_counted_per_run(tmp_path):
+    crowns = _write_crowns(tmp_path, ["prefix,メイショウ,10"])
+    analyzer = TextAnalyzer(crowns_path=crowns)
+    counter = analyzer.analyze_japanese(["メイショウホゲとメイショウフゲ"])
+    assert counter["メイショウ"] == 2
+
+
+def test_crowns_invalid_position_ignored(tmp_path):
+    crowns = _write_crowns(tmp_path, ["middle,メイショウ,10", "prefix,キタサン,10"])
+    analyzer = TextAnalyzer(crowns_path=crowns)
+    counter = analyzer.analyze_japanese(["メイショウホゲ キタサンホゲ"])
+    assert counter["メイショウ"] == 0
+    assert counter["キタサン"] == 1
+
+
+def test_crowns_bypass_keywords_whitelist(tmp_path):
+    keywords = tmp_path / "kw.yaml"
+    keywords.write_text("ai_keywords:\n  - 競馬\n", encoding="utf-8")
+    crowns = _write_crowns(tmp_path, ["prefix,メイショウ,10"])
+    analyzer = TextAnalyzer(keywords_path=str(keywords), crowns_path=crowns)
+    counter = analyzer.analyze_japanese(["メイショウホゲが出走"])
+    assert counter["メイショウ"] == 1

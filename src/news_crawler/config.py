@@ -115,6 +115,9 @@ class ReportConfig(BaseModel):
     sudachi_config_path: str = Field(
         default="config/sudachi.json", description="Path to Sudachi config JSON (user dictionaries)"
     )
+    crowns_path: str = Field(
+        default="config/keiba_crowns.csv", description="Path to approved horse-name crown CSV"
+    )
 
 
 class AppConfig(BaseModel):

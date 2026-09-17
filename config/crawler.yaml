@@ -23,6 +23,7 @@ report:
   wordcloud_height: 400
   ai_keywords_path: "config/keiba_keywords.yaml"
   sudachi_config_path: "config/sudachi.json"
+  crowns_path: "config/keiba_crowns.csv"
 
 ai:
   enabled: true

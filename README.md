@@ -116,15 +116,26 @@ uv run news-crawler crawl --dry-run
 
 ### 競馬の専門用語辞書の構築（オプション）
 
-`scripts/build_keiba_dict.py` を用いて、馬名・騎手名・レース名を含む Sudachi ユーザー辞書をビルドできます（PC-KEIBA Database からの直接生成にも対応）。
+`scripts/infer_keiba_crowns.py` と `scripts/build_keiba_dict.py` を用いて、冠名を中心とした小型の Sudachi ユーザー辞書をビルドできます。手順は次の3段階です。
 
 ```bash
-# CSV辞書からビルド
-uv run python scripts/build_keiba_dict.py dict/keiba_dict.csv
+# 1. 冠名候補の抽出 (PGPASSWORD は環境変数で事前に設定しておくこと)
+uv run python scripts/infer_keiba_crowns.py
 
-# PC-KEIBA DBから馬名・騎手名等を抽出して構築
-uv run python scripts/build_keiba_dict.py --pckeiba --categories horses,jockeys,races
+# 2. config/keiba_crowns.csv を開き、誤検出・一般語などの不要行を削除する
+#    (残った全データ行が承認済み冠名として使われます)
+
+# 3. 承認済み冠名 + 手動用語CSV + DBカテゴリでビルド
+uv run python scripts/build_keiba_dict.py dict/keiba_dict.csv \
+  --crowns config/keiba_crowns.csv \
+  --pckeiba --categories jockeys,races,trainers,owners
 ```
+
+候補の抽出では、人手レビュー可能な件数に絞るため既定で DB 出現75頭以上・前方冠名は馬主15名以下・後方冠名は馬主3名以下にフィルタします。後方候補は特に一般語の語尾を拾いやすく、多数馬主にまたがる文字列は冠名ではなく一般語の断片である可能性が高いため、このフィルタで抑制します。`--min-db-count` / `--max-prefix-owners` / `--max-suffix-owners` で既定値を上書きできます。
+
+承認済み冠名は、レポート生成時にカタカナ連続区間の先頭・末尾から直接抽出されます。前方・後方冠名を辞書へ登録するだけでは、未知語である馬名全体を Sudachi が分割できないためです。生成されるユーザー辞書は冠名・騎手名・レース名・調教師名・馬主名などの用語をそのまま認識するために引き続き利用します。
+
+生成される `dict/keiba_user.csv` / `dict/keiba_user.dic`（2万語超過時は連番分割）と `archive/` は Git 管理外です。`dict/uma.csv` は冠名候補の裏付け用の入力であり、最終辞書には直接含まれません。
 
 ---
 
@@ -210,10 +221,12 @@ news_crawler/
 │   ├── sources.yaml            # 競馬ニュース収集ソース設定
 │   ├── crawler.yaml            # クローラー共通・AI・レポート設定
 │   ├── keiba_keywords.yaml     # 競馬キーワード・カテゴリ設定
+│   ├── keiba_crowns.csv        # 冠名候補 (人手で不要行を削除して確定)
 │   └── sudachi.json            # Sudachi 形態素解析設定
 ├── dict/                       # ユーザー辞書用CSV / バイナリ格納先
 ├── scripts/
-│   └── build_keiba_dict.py     # 競馬辞書ビルドスクリプト (PC-KEIBA連携対応)
+│   ├── build_keiba_dict.py     # 競馬辞書ビルドスクリプト (PC-KEIBA連携対応)
+│   └── infer_keiba_crowns.py   # 冠名候補抽出スクリプト (PC-KEIBA連携)
 ├── src/
 │   └── news_crawler/
 │       ├── __init__.py

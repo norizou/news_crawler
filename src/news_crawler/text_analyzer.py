@@ -1,6 +1,8 @@
 """Text analysis module for Japanese and English content."""
 
+import csv
 import re
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -44,6 +46,7 @@ class TextAnalyzer:
         self,
         keywords_path: str | None = None,
         sudachi_config_path: str | None = None,
+        crowns_path: str | None = None,
     ) -> None:
         try:
             # SudachiPy initialization (with optional user dictionaries)
@@ -63,6 +66,12 @@ class TextAnalyzer:
         if keywords_path and Path(keywords_path).exists():
             self._load_keywords(keywords_path)
 
+        # Approved crown names (extracted at Katakana-run boundaries)
+        self.prefix_crowns: tuple[str, ...] = ()
+        self.suffix_crowns: tuple[str, ...] = ()
+        if crowns_path and Path(crowns_path).exists():
+            self._load_crowns(crowns_path)
+
     def _load_keywords(self, keywords_path: str) -> None:
         """Load AI keywords and general stopwords from YAML file."""
         try:
@@ -79,6 +88,59 @@ class TextAnalyzer:
         except Exception as e:
             print(f"Error loading keywords from {keywords_path}: {e}")
 
+    def _load_crowns(self, crowns_path: str) -> None:
+        """Load approved prefix/suffix crowns from the review CSV."""
+        try:
+            prefixes: set[str] = set()
+            suffixes: set[str] = set()
+            with open(crowns_path, encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                if (
+                    not reader.fieldnames
+                    or "position" not in reader.fieldnames
+                    or "crown" not in reader.fieldnames
+                ):
+                    print(
+                        f"Error loading crowns from {crowns_path}: "
+                        "missing position/crown columns"
+                    )
+                    return
+                for record in reader:
+                    crown = "".join(
+                        unicodedata.normalize("NFKC", record.get("crown") or "").split()
+                    )
+                    position = (record.get("position") or "").strip()
+                    if not crown:
+                        continue
+                    if position == "prefix":
+                        prefixes.add(crown)
+                    elif position == "suffix":
+                        suffixes.add(crown)
+            # 最長一致優先でソート
+            self.prefix_crowns = tuple(sorted(prefixes, key=lambda v: (-len(v), v)))
+            self.suffix_crowns = tuple(sorted(suffixes, key=lambda v: (-len(v), v)))
+        except Exception as e:
+            print(f"Error loading crowns from {crowns_path}: {e}")
+
+    def _extract_crowns(self, text: str) -> list[str]:
+        """Extract approved crowns from contiguous Katakana runs in the text."""
+        normalized = unicodedata.normalize("NFKC", text)
+        found: list[str] = []
+        for match in re.finditer(r"[ァ-ヶー・]+", normalized):
+            run = match.group(0)
+            matched = set()
+            for crown in self.prefix_crowns:
+                if len(run) > len(crown) and run.startswith(crown):
+                    matched.add(crown)
+                    found.append(crown)
+                    break
+            for crown in self.suffix_crowns:
+                if len(run) > len(crown) and run.endswith(crown):
+                    if crown not in matched:
+                        found.append(crown)
+                    break
+        return found
+
     def analyze_japanese(self, texts: list[str]) -> Counter[str]:
         """Analyze Japanese texts and return word frequencies of nouns, verbs, and adjectives."""
         if not self.tokenizer:
@@ -88,6 +150,11 @@ class TextAnalyzer:
         for text in texts:
             if not text:
                 continue
+
+            # 承認済み冠名はカタカナ連続区間の先頭/末尾から直接抽出する
+            # (未知語の馬名全体を Sudachi が分割できないため)
+            for crown in self._extract_crowns(text):
+                counter[crown.lower()] += 1
 
             # Use SplitMode.C for capturing combined words, or B/A for more granular
             # For trends, C or B is often better

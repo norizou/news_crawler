@@ -135,6 +135,7 @@ def generate_markdown_report(
         analyzer = TextAnalyzer(
             keywords_path=cfg.ai_keywords_path,
             sudachi_config_path=cfg.sudachi_config_path,
+            crowns_path=cfg.crowns_path,
         )
         viz = VisualizationGenerator(font_path=cfg.japanese_font_path)
 

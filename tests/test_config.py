@@ -207,3 +207,23 @@ ai:
     app_config = load_config(cfg_dir)
     assert app_config.ai.proxy_url == "http://override:11434/v1"
     assert app_config.ai.model == "override-model"
+
+
+def test_report_config_crowns_path_default_and_custom(tmp_path: Path):
+    """Test crowns_path default and custom override in report config."""
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    (cfg_dir / "crawler.yaml").write_text("", encoding="utf-8")
+
+    default_cfg = load_config(cfg_dir)
+    assert default_cfg.report.crowns_path == "config/keiba_crowns.csv"
+
+    (cfg_dir / "crawler.yaml").write_text(
+        """
+report:
+  crowns_path: "config/custom_crowns.csv"
+""",
+        encoding="utf-8",
+    )
+    custom_cfg = load_config(cfg_dir)
+    assert custom_cfg.report.crowns_path == "config/custom_crowns.csv"

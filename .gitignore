@@ -52,6 +52,9 @@ data/cache/
 # Application Outputs
 output/*
 !output/.gitkeep
+archive/
+dict/keiba_user*.csv
+dict/keiba_user*.dic
 
 # Logs
 logs/

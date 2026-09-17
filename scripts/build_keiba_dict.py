@@ -4,7 +4,7 @@
 入力ソース（複数可・混在可）:
   - MeCab形式CSV (13カラム: 見出し,左ID,右ID,コスト,品詞6,見出し,読み,原形)
   - プレーンな名詞リスト (1行1語)
-  - Sudachi形式CSV (19カラム: そのまま通す)
+  - Sudachi形式CSV (18カラム: そのまま通す。旧20カラム形式は自動変換)
   - PC-KEIBA DB から馬名・騎手名・レース名・調教師名・馬主名を直接取得 (--pckeiba)
 
 Sudachi のユーザー辞書は1ファイルあたり約3.2万エントリが上限のため、
@@ -24,13 +24,14 @@ import sys
 import tempfile
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 # ユーザー辞書1ファイルあたりの安全な上限
 # 実測: ~28,000 エントリで正常、30,000 でルックアップが壊れる (内部ID上限 2^15-1 由来)
 CHUNK_SIZE = 20000
 
-# Sudachi ユーザー辞書 CSV カラム数
-SUDACHI_COLS = 19
+# Sudachi ユーザー辞書 CSV カラム数 (公式仕様: 0..17 の18カラム必須)
+SUDACHI_COLS = 18
 # MeCab 形式 (ipadic/mecab-ipadic-neologd 系) カラム数
 MECAB_COLS = 13
 
@@ -38,6 +39,7 @@ DEFAULT_POS = ("名詞", "固有名詞", "一般", "*", "*", "*")
 DEFAULT_COST = "3000"
 
 PCKEIBA_CATEGORIES = ("horses", "jockeys", "races", "trainers", "owners")
+DEFAULT_PCKEIBA_CATEGORIES = ("jockeys", "races", "trainers", "owners")
 PCKEIBA_QUERIES = {
     "horses": "SELECT bamei FROM jvd_um",
     "jockeys": "SELECT kishumei FROM jvd_ks",
@@ -57,7 +59,7 @@ def system_dic_path() -> Path:
     except Exception:
         pass
     # fallback: よくある配置
-    import sudachidict_core
+    import sudachidict_core  # type: ignore[import-untyped]
     p = Path(sudachidict_core.__file__).parent / "resources" / "system.dic"
     if not p.exists():
         sys.exit(
@@ -68,28 +70,45 @@ def system_dic_path() -> Path:
 
 
 def to_sudachi_row(surface: str) -> list[str]:
-    """名詞(固有名詞)として Sudachi 19カラム行を生成."""
+    """名詞(固有名詞)として Sudachi 18カラム行を生成."""
     s = surface.strip()
-    return [s, "0", "0", DEFAULT_COST, s, s, *DEFAULT_POS, s, "*", "A", "*", "*", "*", "*", "*"]
+    return [s, "0", "0", DEFAULT_COST, s, *DEFAULT_POS, s, s, "*", "A", "*", "*", "*"]
+
+
+def convert_legacy_sudachi_row(row: list[str]) -> list[str] | None:
+    """旧20カラム形式 (POSがcol6から始まるずれた行) を正しい18カラムへ変換.
+
+    旧形式: surface,IDs,cost,display,reading,POS6,normalized,dict-id,split,stars
+    新形式: surface,IDs,cost,reading,POS6,normalized,dict-id,split,stars (POSはcol5から)
+    """
+    if len(row) < 20 or row[6] not in {
+        "名詞", "動詞", "形容詞", "副詞", "連体詞", "接続詞",
+        "感動詞", "助詞", "助動詞", "補助記号", "記号", "空白",
+    }:
+        return None
+    return [*row[:5], *row[6:12], row[5], row[12], *row[13:18]]
 
 
 def convert_row(row: list[str]) -> list[str] | None:
     """入力行を Sudachi 形式に正規化. 変換不能なら None."""
     if not row or not row[0].strip():
         return None
-    if len(row) >= SUDACHI_COLS:
-        row = [c.strip() for c in row]
-        # 連接ID -1 は SudachiPy の ubuild で panic するため 0 に補正
-        row[1] = "0" if row[1] == "-1" else row[1]
-        row[2] = "0" if row[2] == "-1" else row[2]
-        return row
-    if len(row) == MECAB_COLS:
-        # MeCab: 見出し,左ID,右ID,コスト,品詞x6,見出し,読み,原形
-        return to_sudachi_row(row[0])
-    # プレーンな単語リスト扱い
-    if len(row) == 1:
-        return to_sudachi_row(row[0])
-    return None
+    row = [c.strip() for c in row]
+    legacy = convert_legacy_sudachi_row(row)
+    if legacy is not None:
+        row = legacy
+    elif len(row) < SUDACHI_COLS:
+        if len(row) == MECAB_COLS:
+            # MeCab: 見出し,左ID,右ID,コスト,品詞x6,見出し,読み,原形
+            return to_sudachi_row(row[0])
+        # プレーンな単語リスト扱い
+        if len(row) == 1:
+            return to_sudachi_row(row[0])
+        return None
+    # 連接ID -1 は SudachiPy の ubuild で panic するため 0 に補正
+    row[1] = "0" if row[1] == "-1" else row[1]
+    row[2] = "0" if row[2] == "-1" else row[2]
+    return row
 
 
 def load_csv_sources(paths: list[Path]) -> list[list[str]]:
@@ -109,6 +128,22 @@ def load_csv_sources(paths: list[Path]) -> list[list[str]]:
 
 def normalize_db_name(value: str) -> str:
     return "".join(value.split())
+
+
+def load_crowns(path: Path) -> list[list[str]]:
+    """承認済み冠名CSV (infer_keiba_crowns.py 出力) の crown 列を Sudachi 行へ変換."""
+    rows: list[list[str]] = []
+    seen: set[str] = set()
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames or "crown" not in reader.fieldnames:
+            sys.exit(f"冠名CSVに crown ヘッダーがありません: {path}")
+        for record in reader:
+            crown = normalize_db_name(record.get("crown") or "")
+            if crown and crown not in seen:
+                seen.add(crown)
+                rows.append(to_sudachi_row(crown))
+    return rows
 
 
 def parse_categories(value: str) -> tuple[str, ...]:
@@ -169,7 +204,7 @@ def build(rows: list[list[str]], out_dir: Path, stem: str, sys_dic: Path) -> lis
             temp_csv_path = temp_path / csv_path.name
             temp_dic_path = temp_path / dic_path.name
             with open(temp_csv_path, "w", newline="", encoding="utf-8") as f:
-                csv.writer(f).writerows(chunk)
+                csv.writer(f, lineterminator="\n").writerows(chunk)
             # 実行中の Python 環境の sudachipy を使う (venv activate 不要にする)
             sudachipy_bin = Path(sys.executable).parent / "sudachipy"
             ubuild_cmd = (
@@ -201,7 +236,7 @@ def build(rows: list[list[str]], out_dir: Path, stem: str, sys_dic: Path) -> lis
 
 def update_sudachi_json(config_path: Path, dic_paths: list[str]) -> None:
     """config/sudachi.json の userDict を生成した辞書で更新."""
-    cfg: dict = {}
+    cfg: dict[str, Any] = {}
     if config_path.exists():
         cfg = json.loads(config_path.read_text(encoding="utf-8"))
     cfg["userDict"] = dic_paths
@@ -220,10 +255,16 @@ def main() -> None:
         help="PC-KEIBA DB から馬名・騎手名・レース名・調教師名・馬主名を取得して追加",
     )
     ap.add_argument(
+        "--crowns",
+        type=Path,
+        help="承認済み冠名CSV (infer_keiba_crowns.py の出力、不要行削除済み)",
+    )
+    ap.add_argument(
         "--categories",
         type=parse_categories,
-        default=PCKEIBA_CATEGORIES,
-        help="DB取得カテゴリをカンマ区切りで指定 (default: horses,jockeys,races,trainers,owners)",
+        default=DEFAULT_PCKEIBA_CATEGORIES,
+        help="DB取得カテゴリをカンマ区切りで指定 (default: jockeys,races,trainers,owners)。 "
+        "horses (全馬名) は明示指定時のみ有効",
     )
     ap.add_argument(
         "--dsn",
@@ -238,13 +279,17 @@ def main() -> None:
     ap.add_argument("--no-config-update", action="store_true", help="sudachi.json を更新しない")
     args = ap.parse_args()
 
-    if not args.inputs and not args.pckeiba:
-        ap.error("入力ファイルか --pckeiba のどちらかを指定してください")
+    if not args.inputs and not args.crowns and not args.pckeiba:
+        ap.error("入力ファイル、--crowns、--pckeiba のいずれかを指定してください")
 
     rows = load_csv_sources([Path(p) for p in args.inputs]) if args.inputs else []
+    seen = {r[0] for r in rows}
+    if args.crowns:
+        crown_rows = load_crowns(args.crowns)
+        rows += [r for r in crown_rows if r[0] not in seen]
+        seen.update(r[0] for r in crown_rows)
     if args.pckeiba:
-        existing = {r[0] for r in rows}
-        rows += [r for r in load_pckeiba(args.dsn, args.categories) if r[0] not in existing]
+        rows += [r for r in load_pckeiba(args.dsn, args.categories) if r[0] not in seen]
 
     if not rows:
         sys.exit("有効なエントリがありません")
