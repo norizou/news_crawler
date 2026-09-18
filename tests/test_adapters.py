@@ -86,6 +86,57 @@ async def test_html_adapter():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_html_adapter_shift_jis():
+    """Shift_JIS page without charset in HTTP header should decode via meta tag."""
+    list_html = """<!DOCTYPE html><html><head><meta charset="Shift_JIS"></head>
+    <body><div class="news_line"><a href="/news/001">ニュース一覧</a></div></body></html>"""
+    art_html = """<!DOCTYPE html><html><head><meta charset="Shift_JIS"></head>
+    <body>
+    <div class="news_title"><h1>JRA レース結果</h1><p class="date">2026-09-18</p></div>
+    <div class="news_body">競馬ニュースの本文です。</div>
+    </body></html>"""
+
+    list_url = "https://example.com/news/"
+    # No charset in Content-Type header, body is Shift_JIS bytes
+    respx.get(list_url).mock(
+        return_value=httpx.Response(
+            200,
+            content=list_html.encode("shift_jis"),
+            headers={"Content-Type": "text/html"},
+        )
+    )
+    respx.get("https://example.com/news/001").mock(
+        return_value=httpx.Response(
+            200,
+            content=art_html.encode("shift_jis"),
+            headers={"Content-Type": "text/html"},
+        )
+    )
+
+    source = SourceConfig(
+        key="jra_like",
+        name="Shift_JIS Site",
+        category="official",
+        fetch_method=FetchMethod.HTML,
+        base_url="https://example.com",
+        list_url=list_url,
+        article_list_selector="div.news_line a",
+        title_selector=".news_title h1",
+        content_selector=".news_body",
+        date_selector=".news_title p.date",
+    )
+    crawler_cfg = CrawlerConfig(download_delay=0.0)
+
+    adapter = HTMLAdapter(source, crawler_cfg)
+    articles = await adapter.fetch()
+
+    assert len(articles) == 1
+    assert articles[0].title == "JRA レース結果"
+    assert "競馬ニュースの本文です" in articles[0].content
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_huggingface_adapter():
     api_url = "https://huggingface.co/api/models?author=deepseek-ai&limit=20"
     payload = [
