@@ -12,7 +12,7 @@
 
 - **ハイブリッド取得**: RSS/Atomフィード、静的HTMLスクレイピング、動的JSレンダリング（Playwright）をサイトの特性に応じて自動適用。
 - **競馬の専門用語への対応**: SudachiPy および競馬用語の辞書（競走馬名・騎手名・レース名等）による高精度な日本語の形態素解析と頻出トレンド抽出。
-- **差分クロール・重複排除**: 正規化URLおよびコンテンツハッシュ（SHA-256）による未取得記事の差分収集。
+- **差分クロール・重複排除**: 正規化URLおよびコンテンツハッシュ（SHA-256）による未取得記事の差分収集。加えて、正規化タイトル完全一致によるクロスソース重複検出（`news-crawler dedupe`）で、別サイトが同じ発表を独自記事化したケースも代表記事へ集約。
 - **SQLite + FTS5 全文検索**: 高速なローカル全文検索により、馬名や騎手名での横断検索が可能。
 - **柔軟な設定管理**: `config/sources.yaml` で対象ソース・セレクター・取得頻度を一元管理。
 - **Markdownレポート出力**: カテゴリ別・ソース別の新着記事サマリーおよびワードクラウド画像を自動生成。
@@ -32,8 +32,10 @@ graph TD
     A --> N[正規化・本文抽出]
     B --> N
     P --> N
-    N --> D[重複排除・差分判定]
+    N --> D[URL・ハッシュ差分判定]
     D --> DB[(SQLite + FTS5: data/articles.db)]
+    DB --> DD[クロスソース重複判定: news-crawler dedupe]
+    DD --> DB
     DB --> O[レポート・分析生成]
     O --> M[Markdownレポート]
     O --> W[WordCloud / グラフ画像]
@@ -42,6 +44,7 @@ graph TD
     style T fill:#fff3cd
     style P fill:#fff3cd
     style DB fill:#e8f5e9
+    style DD fill:#ffe0b2
     style O fill:#f3e5f5
 ```
 
@@ -96,14 +99,14 @@ uv run news-crawler crawl --source netkeiba
 uv run news-crawler crawl --dry-run
 ```
 
-### 現在の登録ソース一覧（有効10 + 無効1 = 計11サイト）
+### 現在の登録ソース一覧（有効8 + 無効3 = 計11サイト）
 
 | キー | サイト名 | カテゴリ | 取得方式 | 状態 |
 | --- | --- | --- | --- | --- |
 | `netkeiba` | netkeiba ニュース＆コラム | media | RSS | 有効 |
 | `nikkansports` | 日刊スポーツ 競馬 | sports_paper | RSS | 有効 |
-| `google_news_keiba` | Google News (競馬) | aggregator | RSS | 有効 |
-| `google_news_jra` | Google News (JRA) | aggregator | RSS | 有効 |
+| `google_news_keiba` | Google News (競馬) | aggregator | RSS | 無効 |
+| `google_news_jra` | Google News (JRA) | aggregator | RSS | 無効 |
 | `jra` | JRA 公式ニュース | official | HTML | 有効 |
 | `radionikkei` | ラジオNIKKEI 競馬実況Web | media | HTML | 有効 |
 | `sponichi` | スポニチ競馬Web | sports_paper | HTML | 有効 |
@@ -111,6 +114,8 @@ uv run news-crawler crawl --dry-run
 | `keibalab` | 競馬ラボ | media | HTML | 有効 |
 | `tospo` | 東スポ競馬 | sports_paper | Playwright | 有効 |
 | `kaba_tsu_jra` | TSL JRA指数予想 | prediction | RSS | 無効 |
+
+> `google_news_keiba` / `google_news_jra` は、同一の配信記事を Yahoo!ニュース・UMATOKU・各地方紙など数十のポータル名義で重複配信するため無効化しています（2026-09-18）。個別ニュースサイトの一次情報は `netkeiba` 等の他ソースで収集済みです。
 
 ---
 
@@ -158,7 +163,36 @@ uv run news-crawler report --period month
 
 # 可視化画像なしでテキストのみ出力
 uv run news-crawler report --no-visualize
+
+# 特定ソースを除外（再クロール不要、既存DBから再生成）
+uv run news-crawler report --period month --exclude-source google_news_keiba --exclude-source google_news_jra
+
+# クロスソース重複記事（news-crawler dedupe で検出済み）を除外
+uv run news-crawler report --period month --exclude-duplicates
 ```
+
+「原文」ワードクラウド・パイチャートは、まず SudachiPy による日本語の形態素解析を試み、結果が空の場合のみ英数字抽出にフォールバックします。日本語フォントは `_detect_japanese_font()` が代表的なインストールパスを自動探索し、見つからない場合は matplotlib が認識済みのフォント一覧から CJK 対応フォント（Hiragino・Noto Sans JP 等）を名前で検索します。特定のフォントを使いたい場合は `config/crawler.yaml` の `report.japanese_font_path` で明示指定できます。
+
+---
+
+### 重複記事の検出（クロスソース Dedupe）
+
+同一URLの重複は差分クロールで排除されますが、**別々のサイトが同じプレスリリースを独自記事化した場合**（例: netkeiba とスポニチが同じ発表を同一タイトルで別記事として配信）は検出できません。`news-crawler dedupe` は、正規化タイトルが完全一致する記事を異なるソース間で横断的に検索し、`published_at` が最も早い記事を代表として残りを重複マークします。
+
+```bash
+# 直近30日を対象に、DBへ書き込まず検出結果だけプレビュー（既定）
+uv run news-crawler dedupe --period month
+
+# 検出結果をDBに反映（duplicate_of_id / duplicate_score を保存）
+uv run news-crawler dedupe --period month --apply
+
+# 短いタイトルの誤検出を避ける閾値を調整（既定15文字）
+uv run news-crawler dedupe --period month --apply --min-title-len 20
+```
+
+- 冪等な処理のため、日付抽出バグを直した後などに何度でも再実行できます（実行ごとに対象期間の判定を最初から計算し直します）。
+- 重複マークされた記事は `news-crawler enrich`（AI要約）の対象から自動的に除外され、`report --exclude-duplicates` でレポートからも除外できます。
+- 現状はタイトル完全一致のみに対応（`duplicate_score` は常に `1.0`）。将来的に埋め込みベースの類似度判定を追加する場合も、同じカラムに小数スコアを保存できるよう設計されています。
 
 ---
 
@@ -235,7 +269,8 @@ news_crawler/
 │       ├── config.py           # 設定ローダー
 │       ├── models.py           # Pydantic データモデル
 │       ├── database.py         # SQLite + FTS5 リポジトリ
-│       ├── normalizer.py       # URL・本文正規化
+│       ├── normalizer.py       # URL・本文・タイトル正規化
+│       ├── dedupe.py           # クロスソース重複検出（正規化タイトル完全一致）
 │       ├── text_analyzer.py    # SudachiPy 形態素解析
 │       ├── visualization.py    # WordCloud / グラフ画像生成
 │       ├── reporting.py        # Markdown レポート生成

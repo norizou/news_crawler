@@ -45,8 +45,11 @@ uv run news-crawler enrich --days 7 --limit 50
 # 失敗した記事を再試行
 uv run news-crawler enrich --days 7 --retry-failed
 
-# レポート生成
+# レポート生成（--exclude-source / --exclude-duplicates で再クロールなしに絞り込み再生成可）
 uv run news-crawler report
+
+# クロスソース重複記事の検出（既定はdry-run。--applyでDB反映）
+uv run news-crawler dedupe --period month --apply
 
 # 検索 (FTS5、英文・日本語対応)
 uv run news-crawler search "キーワード"
