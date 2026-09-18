@@ -11,7 +11,8 @@ from news_crawler.ai_processor import AIProcessor
 from news_crawler.config import load_config
 from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
-from news_crawler.reporting import generate_markdown_report
+from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
+from news_crawler.reporting import generate_markdown_report, resolve_report_period
 
 console = Console()
 
@@ -119,6 +120,19 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
     help="Filter report by category (e.g. 'official', 'media').",
 )
 @click.option(
+    "--exclude-source",
+    "exclude_source_keys",
+    type=str,
+    multiple=True,
+    help="Source key to exclude from report (repeatable, e.g. -x google_news_jra).",
+)
+@click.option(
+    "--exclude-duplicates/--include-duplicates",
+    default=False,
+    help="Exclude articles marked as cross-source duplicates via 'news-crawler dedupe' "
+    "(default: include).",
+)
+@click.option(
     "--output",
     "-o",
     type=click.Path(dir_okay=False, path_type=Path),
@@ -148,6 +162,8 @@ def report(
     end_date: str | None,
     period: str | None,
     category: str | None,
+    exclude_source_keys: tuple[str, ...],
+    exclude_duplicates: bool,
     output: Path | None,
     visualize: bool | None,
     top_n: int | None,
@@ -178,6 +194,8 @@ def report(
             end_date=end_date,
             period=period,
             category=category,
+            exclude_source_keys=list(exclude_source_keys) or None,
+            exclude_duplicates=exclude_duplicates,
             output_path=output,
             report_config=report_cfg,
         )
@@ -292,6 +310,114 @@ def search(query: str, category: str | None, limit: int, config_dir: Path) -> No
         if res.snippet:
             console.print(f"   Snippet: {res.snippet}")
         console.print()
+
+
+@main.command()
+@click.option(
+    "--days",
+    "-d",
+    type=int,
+    default=None,
+    help="Number of days to include (default: 7).",
+)
+@click.option(
+    "--start-date",
+    type=str,
+    default=None,
+    help="Start date for the scan (YYYY-MM-DD).",
+)
+@click.option(
+    "--end-date",
+    type=str,
+    default=None,
+    help="End date for the scan (YYYY-MM-DD).",
+)
+@click.option(
+    "--period",
+    "-p",
+    type=click.Choice(["week", "month", "quarter"]),
+    default=None,
+    help="Predefined period for the scan.",
+)
+@click.option(
+    "--min-title-len",
+    type=int,
+    default=DEFAULT_MIN_TITLE_LEN,
+    help=f"Minimum normalized title length to consider for matching "
+    f"(default: {DEFAULT_MIN_TITLE_LEN}).",
+)
+@click.option(
+    "--dry-run/--apply",
+    "dry_run",
+    default=True,
+    help="Preview detected duplicates without writing to the database (default: dry-run).",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def dedupe(
+    days: int | None,
+    start_date: str | None,
+    end_date: str | None,
+    period: str | None,
+    min_title_len: int,
+    dry_run: bool,
+    config_dir: Path,
+) -> None:
+    """Detect and mark cross-source duplicate articles (same story, different outlet).
+
+    Matches are based on exact normalized-title equality across different
+    sources within the scanned window; the earliest-published article in each
+    cluster is kept as canonical. Idempotent and safe to re-run.
+    """
+    app_config = load_config(config_dir)
+    db = Database(app_config.crawler.database_path)
+
+    try:
+        start_at, end_at, _mode = resolve_report_period(days, start_date, end_date, period)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        ctx = click.get_current_context()
+        click.echo(ctx.get_help())
+        ctx.exit(1)
+        return
+
+    matches = run_dedupe(
+        db, start_at, end_at, dry_run=dry_run, min_title_len=min_title_len
+    )
+
+    mode_text = "[yellow][DRY RUN][/yellow] " if dry_run else ""
+    if not matches:
+        console.print(f"{mode_text}No cross-source duplicates found.")
+        return
+
+    table = Table(title=f"{'[DRY RUN] ' if dry_run else ''}Detected Duplicates ({len(matches)})")
+    table.add_column("Canonical Source", style="green")
+    table.add_column("Canonical Title", overflow="fold")
+    table.add_column("Duplicate Source", style="yellow")
+    table.add_column("Duplicate Title", overflow="fold")
+    table.add_column("Score", justify="right")
+
+    for m in matches:
+        table.add_row(
+            m.canonical.source_key,
+            m.canonical.title,
+            m.duplicate.source_key,
+            m.duplicate.title,
+            f"{m.score:.2f}",
+        )
+
+    console.print(table)
+    if dry_run:
+        console.print(
+            f"{len(matches)} duplicate(s) detected. Re-run with [bold]--apply[/bold] "
+            "to persist."
+        )
+    else:
+        console.print(f"[green]{len(matches)} duplicate(s) marked in the database.[/green]")
 
 
 @main.command("list-sources")

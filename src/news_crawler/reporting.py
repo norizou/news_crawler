@@ -77,6 +77,8 @@ def generate_markdown_report(
     end_date: str | None = None,
     period: str | None = None,
     category: str | None = None,
+    exclude_source_keys: list[str] | None = None,
+    exclude_duplicates: bool = False,
     output_path: str | Path | None = None,
     report_config: ReportConfig | None = None,
 ) -> str:
@@ -85,7 +87,13 @@ def generate_markdown_report(
 
     start_at, end_at, mode = resolve_report_period(days, start_date, end_date, period)
 
-    articles = db.get_articles_in_range(start_at, end_at, category=category)
+    articles = db.get_articles_in_range(
+        start_at,
+        end_at,
+        category=category,
+        exclude_source_keys=exclude_source_keys,
+        exclude_duplicates=exclude_duplicates,
+    )
 
     # Group by category and source
     by_category: dict[str, dict[str, list[Article]]] = defaultdict(lambda: defaultdict(list))
@@ -169,9 +177,11 @@ def generate_markdown_report(
             lines.append("分析対象となる日本語コンテンツ（AI処理済み記事）がありませんでした。")
             lines.append("")
 
-        # Original analysis
-        en_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
-        en_freq = analyzer.analyze_english(en_texts)
+        # Original analysis: try Japanese morphological analysis first since the
+        # crawled sources are Japanese-language keiba media, falling back to the
+        # English word extractor for sources whose original text is English.
+        orig_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
+        en_freq = analyzer.analyze_japanese(orig_texts) or analyzer.analyze_english(orig_texts)
         if en_freq:
             wc_path = assets_dir / "wordcloud_original.png"
             pie_path = assets_dir / "frequency_original.png"

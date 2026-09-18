@@ -27,7 +27,7 @@ sources:
     name: "Google News (競馬)"
     category: "aggregator"
     fetch_method: "rss"
-    enabled: true
+    enabled: false # 同一記事を多数の再配信サイト名義で重複配信するため無効化（2026-09-18）
     base_url: "https://news.google.com/"
     feed_url: "https://news.google.com/rss/search?q=%E7%AB%B6%E9%A6%AC&hl=ja&gl=JP&ceid=JP:ja"
     list_url: "https://news.google.com/search?q=競馬&hl=ja&gl=JP&ceid=JP:ja"
@@ -36,7 +36,7 @@ sources:
     name: "Google News (JRA)"
     category: "aggregator"
     fetch_method: "rss"
-    enabled: true
+    enabled: false # 同一記事を多数の再配信サイト名義で重複配信するため無効化（2026-09-18）
     base_url: "https://news.google.com/"
     feed_url: "https://news.google.com/rss/search?q=JRA&hl=ja&gl=JP&ceid=JP:ja"
     list_url: "https://news.google.com/search?q=JRA&hl=ja&gl=JP&ceid=JP:ja"
@@ -55,6 +55,7 @@ sources:
     title_selector: ".news_title h1"
     content_selector: ".news_body"
     date_selector: ".news_title p.date"
+    encoding: "shift_jis" # jra.go.jp は Shift_JIS (HTTPヘッダにcharset無し)
 
   radionikkei:
     name: "ラジオNIKKEI 競馬実況Web"
@@ -99,7 +100,8 @@ sources:
     enabled: true
     base_url: "https://keibalab.jp/"
     list_url: "https://keibalab.jp/"
-    article_list_selector: "a[href^='/topics/']"
+    # bbs.html（コメント欄）・backnumber.html・IDなしの "/topics/" は記事ではないため除外
+    article_list_selector: "a[href^='/topics/']:not([href$='bbs.html']):not([href*='backnumber']):not([href='/topics/'])"
     title_selector: "h1.heading02"
     content_selector: "div.post"
     date_selector: ".date.clear.tR"

@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from news_crawler.models import Article, CrawlRun, SearchResult, SourceConfig
-from news_crawler.normalizer import compute_content_hash, normalize_url
+from news_crawler.normalizer import (
+    compute_content_hash,
+    normalize_title_for_dedupe,
+    normalize_url,
+)
 
 
 class Database:
@@ -138,6 +142,7 @@ class Database:
             # Backward compatible schema migration for AI fields
             self._migrate_ai_columns(conn)
             self._migrate_japanese_fts(conn)
+            self._migrate_dedupe_columns(conn)
 
     def _migrate_ai_columns(self, conn: sqlite3.Connection) -> None:
         """Add AI-related columns to articles table if they don't exist."""
@@ -159,6 +164,41 @@ class Database:
         for col_name, col_type in columns_to_add:
             if col_name not in existing_columns:
                 conn.execute(f"ALTER TABLE articles ADD COLUMN {col_name} {col_type}")
+
+    def _migrate_dedupe_columns(self, conn: sqlite3.Connection) -> None:
+        """Add cross-source duplicate-detection columns to articles table if missing."""
+        columns_to_add = [
+            ("normalized_title", "TEXT"),
+            ("duplicate_of_id", "INTEGER"),
+            ("duplicate_score", "REAL"),
+        ]
+
+        existing_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(articles)").fetchall()
+        }
+
+        for col_name, col_type in columns_to_add:
+            if col_name not in existing_columns:
+                conn.execute(f"ALTER TABLE articles ADD COLUMN {col_name} {col_type}")
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_articles_normalized_title "
+            "ON articles(normalized_title)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_articles_duplicate_of_id "
+            "ON articles(duplicate_of_id)"
+        )
+
+        # Backfill normalized_title for rows inserted before this column existed
+        rows = conn.execute(
+            "SELECT id, title FROM articles WHERE normalized_title IS NULL"
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                "UPDATE articles SET normalized_title = ? WHERE id = ?",
+                (normalize_title_for_dedupe(row["title"]), row["id"]),
+            )
 
     def _migrate_japanese_fts(self, conn: sqlite3.Connection) -> None:
         """Create Japanese FTS5 table with trigram tokenizer if it doesn't exist."""
@@ -245,6 +285,7 @@ class Database:
         """
         norm_url = normalize_url(article.url)
         content_hash = compute_content_hash(article.title, article.content)
+        norm_title = normalize_title_for_dedupe(article.title)
         tags_json = json.dumps(article.tags, ensure_ascii=False)
 
         pub_iso = article.published_at.isoformat() if article.published_at else None
@@ -265,9 +306,9 @@ class Database:
                     INSERT INTO articles (
                         source_key, url, normalized_url, title, summary, content,
                         published_at, fetched_at, content_hash, category, author, tags,
-                        ai_status
+                        ai_status, normalized_title
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                     """,
                     (
                         article.source_key,
@@ -282,6 +323,7 @@ class Database:
                         article.category,
                         article.author,
                         tags_json,
+                        norm_title,
                     ),
                 )
                 article.id = cur.lastrowid
@@ -307,6 +349,7 @@ class Database:
                         category = ?,
                         author = COALESCE(?, author),
                         tags = ?,
+                        normalized_title = ?,
                         updated_at = CURRENT_TIMESTAMP,
                         ai_status = 'pending',
                         title_ja = '',
@@ -314,7 +357,9 @@ class Database:
                         ai_input_hash = '',
                         ai_model = '',
                         ai_processed_at = NULL,
-                        ai_error = NULL
+                        ai_error = NULL,
+                        duplicate_of_id = NULL,
+                        duplicate_score = NULL
                     WHERE id = ?
                     """,
                     (
@@ -327,6 +372,7 @@ class Database:
                         article.category,
                         article.author,
                         tags_json,
+                        norm_title,
                         existing_id,
                     ),
                 )
@@ -563,6 +609,7 @@ class Database:
             SELECT * FROM articles
             WHERE (published_at >= ? OR (published_at IS NULL AND fetched_at >= ?))
             AND ai_status = 'pending'
+            AND duplicate_of_id IS NULL
         """
         params: list[Any] = [cutoff_iso, cutoff_iso]
 
@@ -765,6 +812,12 @@ class Database:
             ),
             ai_processed_at=ai_processed_at,
             ai_error=row["ai_error"] if "ai_error" in keys else None,
+            duplicate_of_id=(
+                row["duplicate_of_id"] if "duplicate_of_id" in keys else None
+            ),
+            duplicate_score=(
+                row["duplicate_score"] if "duplicate_score" in keys else None
+            ),
         )
 
     def get_articles_in_range(
@@ -772,6 +825,8 @@ class Database:
         start_at: datetime,
         end_at: datetime,
         category: str | None = None,
+        exclude_source_keys: list[str] | None = None,
+        exclude_duplicates: bool = False,
     ) -> list[Article]:
         """Fetch articles published or fetched within the specified date range."""
         start_iso = start_at.isoformat()
@@ -790,9 +845,44 @@ class Database:
             query += " AND category = ?"
             params.append(category)
 
+        if exclude_source_keys:
+            placeholders = ", ".join("?" for _ in exclude_source_keys)
+            query += f" AND source_key NOT IN ({placeholders})"
+            params.extend(exclude_source_keys)
+
+        if exclude_duplicates:
+            query += " AND duplicate_of_id IS NULL"
+
         query += " ORDER BY COALESCE(published_at, fetched_at) DESC"
 
         with self.connection() as conn:
             cur = conn.execute(query, params)
             rows = cur.fetchall()
             return [self._row_to_article(row) for row in rows]
+
+    def reset_duplicates_in_range(self, start_at: datetime, end_at: datetime) -> int:
+        """Clear duplicate_of_id/duplicate_score for articles in range.
+
+        Used before recomputing duplicate clusters so that the detection stays
+        idempotent (a stale grouping from a previous run never lingers).
+        """
+        start_iso = start_at.isoformat()
+        end_iso = end_at.isoformat()
+        query = """
+            UPDATE articles SET duplicate_of_id = NULL, duplicate_score = NULL
+            WHERE (
+                (published_at >= ? AND published_at < ?)
+                OR (published_at IS NULL AND fetched_at >= ? AND fetched_at < ?)
+            )
+        """
+        with self.connection() as conn:
+            cur = conn.execute(query, [start_iso, end_iso, start_iso, end_iso])
+            return cur.rowcount
+
+    def mark_duplicate(self, article_id: int, canonical_id: int, score: float) -> None:
+        """Mark an article as a duplicate of another (canonical) article."""
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE articles SET duplicate_of_id = ?, duplicate_score = ? WHERE id = ?",
+                (canonical_id, score, article_id),
+            )

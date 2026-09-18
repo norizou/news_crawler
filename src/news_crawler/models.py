@@ -54,6 +54,11 @@ class SourceConfig(BaseModel):
         default=None, description="Selector to wait for in Playwright"
     )
     headers: dict[str, str] = Field(default_factory=dict, description="Custom HTTP headers")
+    encoding: str | None = Field(
+        default=None,
+        description="Force a specific page encoding (e.g. 'shift_jis'). "
+        "If omitted, encoding is detected from the response header/meta tags.",
+    )
 
 
 class Article(BaseModel):
@@ -80,6 +85,12 @@ class Article(BaseModel):
     ai_prompt_version: str = Field(default="1", description="Prompt version used")
     ai_processed_at: datetime | None = Field(default=None, description="AI processing timestamp")
     ai_error: str | None = Field(default=None, description="AI processing error message")
+    duplicate_of_id: int | None = Field(
+        default=None, description="ID of the canonical article this duplicates, if any"
+    )
+    duplicate_score: float | None = Field(
+        default=None, description="Similarity score used to mark this as a duplicate"
+    )
 
 
 class CrawlResult(BaseModel):

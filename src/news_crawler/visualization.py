@@ -5,10 +5,27 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from wordcloud import WordCloud
 
 # Use Agg backend to avoid GUI issues in headless environment
 matplotlib.use("Agg")
+
+# Font name fragments (lowercase) that indicate CJK/Japanese glyph coverage,
+# used to search fonts matplotlib already knows about when none of the
+# hardcoded candidate paths below exist on this machine.
+_JAPANESE_FONT_NAME_KEYWORDS = (
+    "hiragino",
+    "noto sans jp",
+    "noto sans cjk",
+    "yu gothic",
+    "yu mincho",
+    "meiryo",
+    "ms gothic",
+    "ms mincho",
+    "ud gothic",
+    "biz ud",
+)
 
 
 class VisualizationGenerator:
@@ -20,7 +37,14 @@ class VisualizationGenerator:
         self.random_state = 42
 
     def _detect_japanese_font(self) -> str | None:
-        """Attempt to detect a Japanese font on the system."""
+        """Attempt to detect a Japanese font on the system.
+
+        Checks common install paths first (fast, no font-cache scan needed),
+        then falls back to searching matplotlib's already-loaded font list by
+        name, since Japanese fonts are frequently installed at user- or
+        distro-specific paths (e.g. macOS's Hiragino/Noto Sans JP) that can't
+        all be enumerated as fixed paths.
+        """
         candidates = [
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
@@ -29,13 +53,23 @@ class VisualizationGenerator:
             "/usr/share/fonts/truetype/ipafont-gothic/ipag.ttf",
             "/usr/share/fonts/truetype/noto/NotoSansJP-Regular.otf",
             "/usr/share/fonts/opentype/noto/NotoSansJP-Regular.otf",
-            "/System/Library/Fonts/PingFang.ttc",  # MacOS
+            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
+            "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",  # macOS
+            "/System/Library/Fonts/PingFang.ttc",  # macOS (older versions)
             "C:\\Windows\\Fonts\\msjh.ttc",      # Windows
             "C:\\Windows\\Fonts\\msgothic.ttc",  # Windows
         ]
         for path in candidates:
             if Path(path).exists():
                 return path
+
+        for font in font_manager.fontManager.ttflist:
+            name = font.name.lower()
+            if any(kw in name for kw in _JAPANESE_FONT_NAME_KEYWORDS) and Path(
+                font.fname
+            ).exists():
+                return font.fname
+
         return None
 
     def generate_wordcloud(
@@ -89,7 +123,6 @@ class VisualizationGenerator:
 
             # Setup font for Japanese labels if needed
             if self.font_path:
-                from matplotlib import font_manager
                 prop = font_manager.FontProperties(fname=self.font_path)
             else:
                 prop = None
