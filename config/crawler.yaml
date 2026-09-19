@@ -15,6 +15,7 @@ crawler:
   output_dir: "output"
 
 report:
+  output_dir: "/Users/norihito/Library/Mobile Documents/iCloud~md~obsidian/Documents/10_KEIBA/news_crawl"
   visualize: true
   top_n: 20
   japanese_font_path: ""

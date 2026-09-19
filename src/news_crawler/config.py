@@ -108,6 +108,9 @@ class ReportConfig(BaseModel):
     tags: list[str] = Field(
         default_factory=lambda: ["news", "report"], description="Report frontmatter tags"
     )
+    output_dir: str | None = Field(
+        default=None, description="Output directory for reports (overrides crawler.output_dir)"
+    )
     visualize: bool = Field(default=False, description="Enable visualization")
     top_n: int = Field(default=20, description="Top N words for frequency chart")
     japanese_font_path: str = Field(default="", description="Path to Japanese font file")

@@ -258,3 +258,23 @@ sources:
     assert "netkeiba" in app_config.sources
     assert app_config.report.title == "競馬ニュース動向レポート"
     assert app_config.report.tags == ["keiba", "news", "weekend"]
+
+
+def test_load_config_with_report_output_dir(tmp_path: Path):
+    """Test loading configuration with custom report output_dir."""
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+
+    (cfg_dir / "crawler.yaml").write_text(
+        """
+crawler:
+  output_dir: "output"
+report:
+  output_dir: "/path/to/custom_reports"
+""",
+        encoding="utf-8",
+    )
+    app_config = load_config(cfg_dir)
+    assert app_config.crawler.output_dir == "output"
+    assert app_config.report.output_dir == "/path/to/custom_reports"
+

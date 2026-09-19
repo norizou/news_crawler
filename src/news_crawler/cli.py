@@ -230,7 +230,8 @@ def report(
         from datetime import datetime
 
         today_str = datetime.now().strftime("%Y%m%d")
-        output = Path(app_config.crawler.output_dir) / f"weekly_report_{today_str}.md"
+        report_dir = report_cfg.output_dir or app_config.crawler.output_dir
+        output = Path(report_dir) / f"weekly_report_{today_str}.md"
 
     # Sources disabled in config (e.g. Google News aggregators) are excluded from
     # reports by default too, since old crawled articles remain in the database.
