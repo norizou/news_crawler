@@ -60,6 +60,27 @@ stopwords_general:
     assert "調査" not in counter  # Not in whitelist
     assert "リリース" not in counter  # Not in whitelist
 
+def test_analyze_japanese_stopwords_general_overrides_ai_keywords(tmp_path):
+    # A term whitelisted by ai_keywords but also genre-generic (e.g. "競馬")
+    # should still be excluded once it is added to stopwords_general.
+    keywords_file = tmp_path / "test_keywords.yaml"
+    keywords_file.write_text("""
+ai_keywords:
+  - 競馬
+  - 重賞
+stopwords_general:
+  - 競馬
+""", encoding="utf-8")
+
+    analyzer = TextAnalyzer(keywords_path=str(keywords_file))
+    texts = ["競馬の重賞レースで優勝した。"]
+
+    counter = analyzer.analyze_japanese(texts)
+
+    assert "競馬" not in counter
+    assert "重賞" in counter
+
+
 def test_analyze_japanese_lemma():
     analyzer = TextAnalyzer()
     texts = ["走る、走った、走れば。"]

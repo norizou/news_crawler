@@ -45,8 +45,12 @@ uv run news-crawler enrich --days 7 --limit 50
 # 失敗した記事を再試行
 uv run news-crawler enrich --days 7 --retry-failed
 
-# レポート生成（--exclude-source / --exclude-duplicates で再クロールなしに絞り込み再生成可）
+# レポート生成（sources.yaml で enabled: false のソースは既定で自動除外。
+# タイトル・タグは sources.yaml または --title, --tags で柔軟に指定可。
+# 別のソース定義を使う場合は --sources-file / -f で切り替え可能）
 uv run news-crawler report
+uv run news-crawler report --title "競馬ニュース週報" --tags keiba,weekly
+uv run news-crawler report --sources-file config/sources.ai.yaml --title "AI Trend Report"
 
 # クロスソース重複記事の検出（既定はdry-run。--applyでDB反映）
 uv run news-crawler dedupe --period month --apply
@@ -56,6 +60,11 @@ uv run news-crawler search "キーワード"
 
 # 統計確認 (AI処理ステータス含む)
 uv run news-crawler stats
+
+# レースコメント出力 (TARGET frontier JV 向け一括インポート用 CSV、FAQ 612 準拠)
+uv run news-crawler export-comments
+uv run news-crawler export-comments --race ながつき
+uv run news-crawler export-comments --date 2026-09-19 --venue 中山
 ```
 
 ### 静的解析・テスト

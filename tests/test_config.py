@@ -227,3 +227,34 @@ report:
     )
     custom_cfg = load_config(cfg_dir)
     assert custom_cfg.report.crowns_path == "config/custom_crowns.csv"
+
+
+def test_load_config_with_sources_file_and_metadata(tmp_path: Path):
+    """Test loading specific sources file with custom title and tags."""
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+
+    # sources.keiba.yaml
+    keiba_file = tmp_path / "sources.keiba.yaml"
+    keiba_file.write_text(
+        """
+title: "競馬ニュース動向レポート"
+tags:
+  - keiba
+  - news
+  - weekend
+
+sources:
+  netkeiba:
+    name: "netkeiba"
+    category: "media"
+    fetch_method: "rss"
+    base_url: "https://netkeiba.com"
+""",
+        encoding="utf-8",
+    )
+
+    app_config = load_config(cfg_dir, sources_file=keiba_file)
+    assert "netkeiba" in app_config.sources
+    assert app_config.report.title == "競馬ニュース動向レポート"
+    assert app_config.report.tags == ["keiba", "news", "weekend"]

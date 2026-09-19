@@ -116,6 +116,8 @@ uv run news-crawler crawl --dry-run
 | `kaba_tsu_jra` | TSL JRA指数予想 | prediction | RSS | 無効 |
 
 > `google_news_keiba` / `google_news_jra` は、同一の配信記事を Yahoo!ニュース・UMATOKU・各地方紙など数十のポータル名義で重複配信するため無効化しています（2026-09-18）。個別ニュースサイトの一次情報は `netkeiba` 等の他ソースで収集済みです。
+>
+> `sources.yaml` で `enabled: false` にしたソースは、`report` コマンドが既定で自動除外します（無効化前にDBへ蓄積済みの過去記事も対象）。手動で `--exclude-source` を指定する必要はありません。
 
 ---
 
@@ -136,7 +138,7 @@ uv run python scripts/build_keiba_dict.py dict/keiba_dict.csv \
   --pckeiba --categories jockeys,races,trainers,owners
 ```
 
-候補の抽出では、人手レビュー可能な件数に絞るため既定で DB 出現75頭以上・前方冠名は馬主15名以下・後方冠名は馬主3名以下にフィルタします。後方候補は特に一般語の語尾を拾いやすく、多数馬主にまたがる文字列は冠名ではなく一般語の断片である可能性が高いため、このフィルタで抑制します。`--min-db-count` / `--max-prefix-owners` / `--max-suffix-owners` で既定値を上書きできます。
+候補の抽出では、人手レビュー可能な件数に絞るため、既定で DB 出現75頭以上、前方冠名を馬主15名以下、後方冠名を馬主3名以下にフィルタします。後方候補は特に一般語の語尾を拾いやすく、多数馬主にまたがる文字列は冠名ではなく一般語の断片である可能性が高いため、このフィルタで抑制します。`--min-db-count` / `--max-prefix-owners` / `--max-suffix-owners` で既定値を上書きできます。
 
 承認済み冠名は、レポート生成時にカタカナ連続区間の先頭・末尾から直接抽出されます。前方・後方冠名を辞書へ登録するだけでは、未知語である馬名全体を Sudachi が分割できないためです。生成されるユーザー辞書は冠名・騎手名・レース名・調教師名・馬主名などの用語をそのまま認識するために引き続き利用します。
 
@@ -164,8 +166,9 @@ uv run news-crawler report --period month
 # 可視化画像なしでテキストのみ出力
 uv run news-crawler report --no-visualize
 
-# 特定ソースを除外（再クロール不要、既存DBから再生成）
-uv run news-crawler report --period month --exclude-source google_news_keiba --exclude-source google_news_jra
+# sources.yaml で enabled: false のソースは自動で除外されるため、
+# それ以外を追加で除外したい場合のみ --exclude-source を指定する
+uv run news-crawler report --period month --exclude-source some_other_source
 
 # クロスソース重複記事（news-crawler dedupe で検出済み）を除外
 uv run news-crawler report --period month --exclude-duplicates
@@ -193,6 +196,35 @@ uv run news-crawler dedupe --period month --apply --min-title-len 20
 - 冪等な処理のため、日付抽出バグを直した後などに何度でも再実行できます（実行ごとに対象期間の判定を最初から計算し直します）。
 - 重複マークされた記事は `news-crawler enrich`（AI要約）の対象から自動的に除外され、`report --exclude-duplicates` でレポートからも除外できます。
 - 現状はタイトル完全一致のみに対応（`duplicate_score` は常に `1.0`）。将来的に埋め込みベースの類似度判定を追加する場合も、同じカラムに小数スコアを保存できるよう設計されています。
+
+---
+
+### レースコメント出力（TARGET frontier JV 向け一括インポート）
+
+クロールしたニュースから**レース単位のニュース・騎手談話**を抽出し、JRA-VAN「TARGET frontier JV」のレースコメント一括登録（FAQ 612準拠）に対応した CSV（Shift_JIS / CP932）を出力できます。
+
+```bash
+# 最新開催日の全レースコメントを一括出力（既定は1レース1行ベタ書き・CP932）
+uv run news-crawler export-comments
+
+# 特定レースのみを抽出（例: ながつきステークス）
+uv run news-crawler export-comments --race ながつき
+
+# 日付・競馬場を指定して出力
+uv run news-crawler export-comments --date 2026-09-19 --venue 中山
+
+# 出力先パスを指定（TARGET の TXT フォルダへ直接出力可能）
+uv run news-crawler export-comments --date 2026-09-19 -o output/my_comments.csv
+
+# 開催回次・日次を手動オーバーライド（例: 中山4回3日、阪神4回3日）
+uv run news-crawler export-comments --date 2026-09-12 --schedule "中山:4:3,阪神:4:3"
+```
+
+- **レース単位での紐付け**: 競馬場とレース番号（1〜12R）が特定できるレース結果・騎手コメントのみを抽出し、一般コラムやWIN5等は自動除外されます。
+- **16桁レースID（新仕様）**: `YYYYMMDDPPKKNNRR`（西暦+月日+場コード+回次+日次+レース番号）を自動算出して1レース1行でCSV生成します。
+- **TARGET完全準拠の1行ベタ書き**: TARGETのCSVパーサー仕様に配慮し、コメント内の改行は半角スペースで連結された1行ベタ書き（`--single-line` 既定）でShift_JIS（CP932）出力されます（`--no-single-line` で改行保持形式も選択可能）。
+- **開催回次・日次の自動解決**: JRA公式「開催競馬場・今日の出来事」ニュースから当日の回次・日次を自動推定します。手動オーバーライドが必要な場合は `--schedule` で指定できます。
+- **TARGET取り込み**: TARGET メインメニュー > 「ファイルからのコメント等一括登録」 > 「レースコメントのインポート」から本CSVを指定することで、出馬表や成績画面に自動表示されます。
 
 ---
 

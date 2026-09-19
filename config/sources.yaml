@@ -1,6 +1,12 @@
 # 競馬ニュース収集ソース設定 (Mac 自宅用)
 # fetch_method: rss | html | playwright
 
+title: "競馬ニュース動向レポート"
+tags:
+  - keiba
+  - news
+  - report
+
 sources:
   # =====================
   # RSS / Atom フィード

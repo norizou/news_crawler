@@ -133,6 +133,77 @@ def test_cli_report_visualize_options(cli_config_dir: Path):
     assert res.exit_code == 2 # Click usage error
 
 
+def test_cli_report_excludes_disabled_sources_by_default(cli_config_dir: Path, tmp_path: Path):
+    """Articles from a source disabled in sources.yaml (e.g. after a Google News
+    de-dup decision) must not appear in the report, even if they remain in the DB
+    from before the source was disabled, and even without an explicit --exclude-source."""
+    from datetime import datetime, timedelta
+
+    from news_crawler.config import load_config
+    from news_crawler.database import Database
+    from news_crawler.models import Article, FetchMethod, SourceConfig
+
+    (cli_config_dir / "sources.yaml").write_text(
+        """
+sources:
+  sample_rss:
+    name: "Sample RSS"
+    category: "official"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://example.com"
+    feed_url: "https://example.com/rss.xml"
+  google_news_keiba:
+    name: "Google News (Disabled)"
+    category: "aggregator"
+    fetch_method: "rss"
+    enabled: false
+    base_url: "https://news.google.com"
+    feed_url: "https://news.google.com/rss"
+""",
+        encoding="utf-8",
+    )
+
+    app_config = load_config(cli_config_dir)
+    db = Database(app_config.crawler.database_path)
+    db.upsert_source(SourceConfig(
+        key="sample_rss", name="Sample RSS", category="official",
+        fetch_method=FetchMethod.RSS, base_url="https://example.com",
+    ))
+    db.upsert_source(SourceConfig(
+        key="google_news_keiba", name="Google News (Disabled)", category="aggregator",
+        fetch_method=FetchMethod.RSS, base_url="https://news.google.com",
+    ))
+    db.upsert_article(Article(
+        source_key="sample_rss",
+        url="https://example.com/kept",
+        normalized_url="https://example.com/kept",
+        title="Kept Article",
+        summary="From an enabled source.",
+        published_at=datetime.now() - timedelta(days=1),
+        category="official",
+    ))
+    db.upsert_article(Article(
+        source_key="google_news_keiba",
+        url="https://news.google.com/stale",
+        normalized_url="https://news.google.com/stale",
+        title="Stale Google News Article",
+        summary="Crawled before the source was disabled.",
+        published_at=datetime.now() - timedelta(days=1),
+        category="aggregator",
+    ))
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["report", "--days", "7", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+
+    today_str = datetime.now().strftime("%Y%m%d")
+    output_path = Path(app_config.crawler.output_dir) / f"weekly_report_{today_str}.md"
+    content = output_path.read_text(encoding="utf-8")
+    assert "Kept Article" in content
+    assert "Stale Google News Article" not in content
+
+
 def test_cli_enrich_disabled(cli_config_dir: Path):
     """Test enrich command when AI is disabled."""
     runner = CliRunner()
@@ -155,3 +226,51 @@ def test_cli_stats_with_ai_status(cli_config_dir: Path):
     assert res_stats.exit_code == 0
     # AI status may or may not be shown depending on whether the section exists
     # Just verify stats command works
+
+
+def test_cli_report_custom_title_tags_sources_file(cli_config_dir: Path, tmp_path: Path):
+    """Test report command with custom --title, --tags, and --sources-file."""
+    custom_sources = tmp_path / "custom_sources.yaml"
+    custom_sources.write_text(
+        """
+title: "競馬ニュース動向レポート"
+tags:
+  - keiba
+  - news
+
+sources:
+  sample_rss:
+    name: "Sample Keiba"
+    category: "media"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://example.com"
+    feed_url: "https://example.com/rss.xml"
+""",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    output_md = tmp_path / "custom_output.md"
+
+    # Test with custom sources file (which sets default title/tags for this file)
+    # but also override title and tags via CLI
+    args = [
+        "report",
+        "--days", "7",
+        "--sources-file", str(custom_sources),
+        "--title", "特別競馬週報",
+        "--tags", "custom,keiba,special",
+        "-o", str(output_md),
+        "--config-dir", str(cli_config_dir),
+    ]
+    res = runner.invoke(main, args)
+    assert res.exit_code == 0
+    assert output_md.exists()
+
+    content = output_md.read_text(encoding="utf-8")
+    assert "title: 特別競馬週報" in content
+    assert "tags:\n- custom\n- keiba\n- special" in content
+    # Ensure pie charts are not generated
+    assert "![日本語単語頻度パイチャート]" not in content
+    assert "![原文単語頻度パイチャート]" not in content

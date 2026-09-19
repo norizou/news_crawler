@@ -104,15 +104,28 @@ def generate_markdown_report(
 
     # FrontMatter
     now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    title_vars = {
+        "title": cfg.title,
+        "date": date_str,
+        "mode": mode,
+        "period_start": start_at.strftime("%Y-%m-%d"),
+        "period_end": (end_at - timedelta(seconds=1)).strftime("%Y-%m-%d"),
+    }
+    try:
+        report_title = cfg.title_template.format(**title_vars)
+    except (KeyError, ValueError):
+        report_title = f"{cfg.title} ({date_str})"
+
     frontmatter = {
-        "title": f"AI Trend Report ({now.strftime('%Y-%m-%d')})",
+        "title": report_title,
         "created": now.strftime("%Y-%m-%d %H:%M:%S"),
         "period": (
             f"{start_at.strftime('%Y-%m-%d')} ~ "
             f"{(end_at - timedelta(seconds=1)).strftime('%Y-%m-%d')}"
         ),
         "total_articles": len(articles),
-        "tags": ["ai", "report", "trends"],
+        "tags": cfg.tags,
         "visualization": cfg.visualize,
         "analysis_top_n": cfg.top_n,
         "analysis_category": category,
@@ -128,7 +141,7 @@ def generate_markdown_report(
     lines.append(
         f"期間: **{start_at.strftime('%Y-%m-%d')}** 〜 "
         f"**{(end_at - timedelta(seconds=1)).strftime('%Y-%m-%d')}** "
-        f"に収集された AI 関連ニュース・動向レポートです。"
+        f"に収集されたニュース動向レポートです。"
     )
     lines.append("")
 
@@ -157,20 +170,11 @@ def generate_markdown_report(
             ja_freq = analyzer.analyze_japanese(ja_texts)
             if ja_freq:
                 wc_path = assets_dir / "wordcloud_ja.png"
-                pie_path = assets_dir / "frequency_ja.png"
-
                 if viz.generate_wordcloud(
                     ja_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height
                 ):
                     lines.append("### 日本語ワードクラウド")
                     lines.append(f"![日本語ワードクラウド]({assets_dir.name}/{wc_path.name})")
-                    lines.append("")
-
-                if viz.generate_pie_chart(
-                    ja_freq, pie_path, top_n=cfg.top_n, title="日本語頻出単語 (Top N)"
-                ):
-                    lines.append(f"### 日本語 Top {cfg.top_n} 単語分布")
-                    lines.append(f"![日本語単語頻度パイチャート]({assets_dir.name}/{pie_path.name})")
                     lines.append("")
         else:
             lines.append("### 日本語分析")
@@ -184,20 +188,11 @@ def generate_markdown_report(
         en_freq = analyzer.analyze_japanese(orig_texts) or analyzer.analyze_english(orig_texts)
         if en_freq:
             wc_path = assets_dir / "wordcloud_original.png"
-            pie_path = assets_dir / "frequency_original.png"
-
             if viz.generate_wordcloud(
                 en_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height
             ):
                 lines.append("### 原文ワードクラウド")
                 lines.append(f"![原文ワードクラウド]({assets_dir.name}/{wc_path.name})")
-                lines.append("")
-
-            if viz.generate_pie_chart(
-                en_freq, pie_path, top_n=cfg.top_n, title="原文頻出単語 (Top N)"
-            ):
-                lines.append(f"### 原文 Top {cfg.top_n} 単語分布")
-                lines.append(f"![原文単語頻度パイチャート]({assets_dir.name}/{pie_path.name})")
                 lines.append("")
         else:
             lines.append("### 原文分析")

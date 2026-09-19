@@ -42,11 +42,31 @@ def test_generate_markdown_report(tmp_path: Path):
 
     assert report_file.exists()
     assert "---" in md
-    assert "title: AI Trend Report" in md
+    assert "title: News Trend Report" in md
+    assert "tags:\n- news\n- report" in md
     assert "OpenAI Test Model Release" in md
     assert "https://openai.com/news/test-post" in md
     assert "OpenAI Team" in md
     assert "| **official** | 1 | 1 |" in md
+
+
+def test_generate_markdown_report_custom_title_and_tags(tmp_path: Path):
+    db_file = tmp_path / "test.db"
+    db = Database(db_file)
+
+    cfg = ReportConfig(
+        title="競馬ニュース動向レポート",
+        title_template="{title} [{mode}] ({date})",
+        tags=["keiba", "weekly", "report"],
+    )
+
+    report_file = tmp_path / "keiba_report.md"
+    md = generate_markdown_report(db, days=7, output_path=report_file, report_config=cfg)
+
+    assert "title: 競馬ニュース動向レポート [days]" in md
+    assert "tags:\n- keiba\n- weekly\n- report" in md
+    # Make sure pie charts and assets dir are not created when visualize=False
+    assert not (tmp_path / "keiba_report_assets").exists()
 
 
 def test_resolve_report_period():

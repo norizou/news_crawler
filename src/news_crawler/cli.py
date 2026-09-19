@@ -13,6 +13,7 @@ from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
 from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
 from news_crawler.reporting import generate_markdown_report, resolve_report_period
+from news_crawler.target_exporter import TargetCommentExporter, get_latest_race_date
 
 console = Console()
 
@@ -39,14 +40,26 @@ def main() -> None:
     help="Simulate crawl without persisting articles to database.",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
+def crawl(
+    source_key: str | None,
+    dry_run: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Execute scraping across registered AI information sources."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     coordinator = CrawlCoordinator(app_config)
 
     mode_text = "[yellow][DRY RUN][/yellow] " if dry_run else ""
@@ -113,6 +126,26 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
     help="Predefined period for report.",
 )
 @click.option(
+    "--title",
+    type=str,
+    default=None,
+    help="Custom report title (overrides config).",
+)
+@click.option(
+    "--tags",
+    "tags",
+    type=str,
+    multiple=True,
+    help="Frontmatter tags (repeatable or comma-separated, e.g. --tags keiba,news).",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--category",
     "-c",
     type=str,
@@ -142,7 +175,7 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
 @click.option(
     "--visualize/--no-visualize",
     default=None,
-    help="Enable/disable word cloud and charts (default: enabled in config).",
+    help="Enable/disable word cloud and charts (default: disabled).",
 )
 @click.option(
     "--top-n",
@@ -161,6 +194,9 @@ def report(
     start_date: str | None,
     end_date: str | None,
     period: str | None,
+    title: str | None,
+    tags: tuple[str, ...],
+    sources_file: Path | None,
     category: str | None,
     exclude_source_keys: tuple[str, ...],
     exclude_duplicates: bool,
@@ -169,12 +205,22 @@ def report(
     top_n: int | None,
     config_dir: Path,
 ) -> None:
-    """Generate Markdown report from crawled articles with visualizations."""
-    app_config = load_config(config_dir)
+    """Generate Markdown report from crawled articles."""
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
 
     # Override config with CLI options
     report_cfg = app_config.report.model_copy()
+    if title is not None:
+        report_cfg.title = title
+    if tags:
+        parsed_tags: list[str] = []
+        for t_item in tags:
+            for t in t_item.split(","):
+                t_clean = t.strip()
+                if t_clean and t_clean not in parsed_tags:
+                    parsed_tags.append(t_clean)
+        report_cfg.tags = parsed_tags
     if visualize is not None:
         report_cfg.visualize = visualize
     if top_n is not None:
@@ -186,6 +232,11 @@ def report(
         today_str = datetime.now().strftime("%Y%m%d")
         output = Path(app_config.crawler.output_dir) / f"weekly_report_{today_str}.md"
 
+    # Sources disabled in config (e.g. Google News aggregators) are excluded from
+    # reports by default too, since old crawled articles remain in the database.
+    disabled_source_keys = [key for key, src in app_config.sources.items() if not src.enabled]
+    combined_exclude_source_keys = sorted(set(exclude_source_keys) | set(disabled_source_keys))
+
     try:
         md_content = generate_markdown_report(
             db,
@@ -194,7 +245,7 @@ def report(
             end_date=end_date,
             period=period,
             category=category,
-            exclude_source_keys=list(exclude_source_keys) or None,
+            exclude_source_keys=combined_exclude_source_keys or None,
             exclude_duplicates=exclude_duplicates,
             output_path=output,
             report_config=report_cfg,
@@ -230,14 +281,27 @@ def report(
     help="Include failed articles in enrichment.",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def enrich(days: int, limit: int, retry_failed: bool, config_dir: Path) -> None:
+def enrich(
+    days: int,
+    limit: int,
+    retry_failed: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Enrich articles with AI-generated Japanese title and summary."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
 
     if not app_config.ai.enabled:
         console.print("[yellow]AI enrichment is disabled in configuration.[/yellow]")
@@ -353,6 +417,13 @@ def search(query: str, category: str | None, limit: int, config_dir: Path) -> No
     help="Preview detected duplicates without writing to the database (default: dry-run).",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
@@ -365,6 +436,7 @@ def dedupe(
     period: str | None,
     min_title_len: int,
     dry_run: bool,
+    sources_file: Path | None,
     config_dir: Path,
 ) -> None:
     """Detect and mark cross-source duplicate articles (same story, different outlet).
@@ -373,7 +445,7 @@ def dedupe(
     sources within the scanned window; the earliest-published article in each
     cluster is kept as canonical. Idempotent and safe to re-run.
     """
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
 
     try:
@@ -422,14 +494,21 @@ def dedupe(
 
 @main.command("list-sources")
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def list_sources(config_dir: Path) -> None:
+def list_sources(sources_file: Path | None, config_dir: Path) -> None:
     """List all registered sources from configuration."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
 
     table = Table(title="Registered AI Sources")
     table.add_column("Key", style="cyan")
@@ -449,14 +528,21 @@ def list_sources(config_dir: Path) -> None:
 
 @main.command()
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def stats(config_dir: Path) -> None:
+def stats(sources_file: Path | None, config_dir: Path) -> None:
     """Show database statistics."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
     info = db.get_stats()
 
@@ -475,5 +561,213 @@ def stats(config_dir: Path) -> None:
             console.print(f"  {status.capitalize()}: [{color}]{count}[/{color}]")
 
 
+
+@main.command("export-comments")
+@click.option(
+    "--date",
+    "-d",
+    "target_date",
+    type=str,
+    default=None,
+    help="Target race date (YYYY-MM-DD). Defaults to latest date in database.",
+)
+@click.option(
+    "--race",
+    "-r",
+    "race_filter",
+    type=str,
+    default=None,
+    help="Filter by specific race name or keyword (e.g. 'ながつき', '大阪スポーツ杯').",
+)
+@click.option(
+    "--venue",
+    "-v",
+    "venue_filter",
+    type=str,
+    default=None,
+    help="Filter by venue (e.g. '中山', '阪神').",
+)
+@click.option(
+    "--race-num",
+    "race_num_filter",
+    type=int,
+    default=None,
+    help="Filter by race number (1-12).",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Output CSV file path (defaults to output/target_comments_YYYYMMDD.csv).",
+)
+@click.option(
+    "--format",
+    "format_type",
+    type=click.Choice(["target", "simple"]),
+    default="target",
+    help="CSV format: 'target' (開催名,レースID,コメント [推奨]) or 'simple' (レースID,コメント).",
+)
+@click.option(
+    "--encoding",
+    type=str,
+    default="cp932",
+    help="Output CSV encoding (default: 'cp932' for Windows TARGET compatibility, or 'utf-8').",
+)
+@click.option(
+    "--kai",
+    type=int,
+    default=None,
+    help="Manual override for Kaiji (回次).",
+)
+@click.option(
+    "--nichi",
+    type=int,
+    default=None,
+    help="Manual override for Nichime (日次).",
+)
+@click.option(
+    "--schedule",
+    "schedule_str",
+    type=str,
+    default=None,
+    help="Manual schedule specification, e.g. '中山:4:5,阪神:4:5' (場:回:日).",
+)
+@click.option(
+    "--single-line/--multi-line",
+    "single_line",
+    default=True,
+    help="Flatten comments into a single line per race (default: single-line for TARGET).",
+)
+@click.option(
+    "--preview/--no-preview",
+    default=True,
+    help="Display table preview of exported comments in terminal (default: enabled).",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def export_comments(
+    target_date: str | None,
+    race_filter: str | None,
+    venue_filter: str | None,
+    race_num_filter: int | None,
+    output: Path | None,
+    format_type: str,
+    encoding: str,
+    kai: int | None,
+    nichi: int | None,
+    schedule_str: str | None,
+    single_line: bool,
+    preview: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
+    """Export race-specific news and comments to CSV for TARGET frontier JV bulk import."""
+    app_config = load_config(config_dir, sources_file=sources_file)
+    db = Database(app_config.crawler.database_path)
+
+    # Determine target date
+    if not target_date:
+        target_date = get_latest_race_date(db)
+        console.print(
+            f"[dim]No date specified. Using latest available date: [bold]{target_date}[/bold][/dim]"
+        )
+
+    # Parse schedule overrides if given
+    schedule_overrides: dict[str, tuple[int, int]] = {}
+    if schedule_str:
+        for part in schedule_str.split(","):
+            items = part.strip().split(":")
+            if len(items) == 3:
+                s_venue = items[0].strip()
+                s_kai = int(items[1].strip())
+                s_nichi = int(items[2].strip())
+                schedule_overrides[s_venue] = (s_kai, s_nichi)
+
+    exporter = TargetCommentExporter(db)
+    comments = exporter.extract_race_comments(
+        target_date=target_date,
+        race_filter=race_filter,
+        venue_filter=venue_filter,
+        race_num_filter=race_num_filter,
+        manual_kai=kai,
+        manual_nichi=nichi,
+        schedule_overrides=schedule_overrides or None,
+    )
+
+    if not comments:
+        filter_desc = []
+        if race_filter:
+            filter_desc.append(f"race='{race_filter}'")
+        if venue_filter:
+            filter_desc.append(f"venue='{venue_filter}'")
+        if race_num_filter:
+            filter_desc.append(f"R={race_num_filter}")
+        desc_str = f" ({', '.join(filter_desc)})" if filter_desc else ""
+        console.print(f"[yellow]No race comments found for {target_date}{desc_str}.[/yellow]")
+        return
+
+    # Determine output path
+    if output is None:
+        safe_date = target_date.replace("-", "")
+        suffix = f"_{race_filter}" if race_filter else ""
+        output = Path(app_config.crawler.output_dir) / f"target_comments_{safe_date}{suffix}.csv"
+
+    out_path = exporter.export_to_file(
+        items=comments,
+        output_path=output,
+        format_type=format_type,  # type: ignore[arg-type]
+        encoding=encoding,
+        single_line=single_line,
+    )
+
+    console.print(
+        f"[bold green]Successfully exported {len(comments)} race comment(s) to:[/bold green] "
+        f"[cyan]{out_path}[/cyan] [dim](Encoding: {encoding.upper()})[/dim]"
+    )
+
+    if preview:
+        table = Table(title=f"TARGET Frontier JV Export Preview ({target_date})")
+        table.add_column("Race ID (16桁)", style="cyan", no_wrap=True)
+        table.add_column("開催", style="magenta", no_wrap=True)
+        table.add_column("レース名", style="bold green")
+        table.add_column("記事数", justify="right")
+        table.add_column("コメント冒頭 (抜粋)", style="dim")
+
+        for it in comments:
+            # Extract first comment line or snippet
+            snippet = it.comment_text.replace("\n", " ")
+            if len(snippet) > 60:
+                snippet = snippet[:57] + "..."
+            table.add_row(
+                it.race_id,
+                f"{it.kaisai_name} {it.race_num}R",
+                it.race_name,
+                str(len(it.source_articles)),
+                snippet,
+            )
+
+        console.print(table)
+
+    console.print(
+        "\n[bold]TARGET frontier JV インポート手順:[/bold]\n"
+        "  1. TARGET メインメニュー > [bold]ファイルからのコメント等一括登録[/bold] を開く\n"
+        "  2. [bold]レースコメントのインポート[/bold] を選択\n"
+        f"  3. [cyan]{out_path}[/cyan] を指定して取り込みを実行（上書き／後に結合 等を選択）\n"
+    )
+
+
 if __name__ == "__main__":
     main()
+

@@ -175,6 +175,10 @@ class TextAnalyzer:
                         not lemma.isdigit() and
                         not re.match(r"^[0-9.]+$", lemma)
                     ):
+                        # Apply general stopwords filter if loaded (excludes overly generic terms)
+                        if self.stopwords_general and lemma.lower() in self.stopwords_general:
+                            continue
+
                         # Apply AI keywords filter if loaded
                         if self.ai_keywords:
                             if lemma in self.ai_keywords:

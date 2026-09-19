@@ -103,7 +103,12 @@ class AIConfig(BaseModel):
 class ReportConfig(BaseModel):
     """Report and visualization configuration."""
 
-    visualize: bool = Field(default=True, description="Enable visualization")
+    title: str = Field(default="News Trend Report", description="Report title prefix")
+    title_template: str = Field(default="{title} ({date})", description="Template for report title")
+    tags: list[str] = Field(
+        default_factory=lambda: ["news", "report"], description="Report frontmatter tags"
+    )
+    visualize: bool = Field(default=False, description="Enable visualization")
     top_n: int = Field(default=20, description="Top N words for frequency chart")
     japanese_font_path: str = Field(default="", description="Path to Japanese font file")
     output_assets_name: str = Field(default="assets", description="Name of assets directory")
@@ -129,7 +134,10 @@ class AppConfig(BaseModel):
     sources: dict[str, SourceConfig] = Field(default_factory=dict)
 
 
-def load_config(config_dir: str | Path = "config") -> AppConfig:
+def load_config(
+    config_dir: str | Path = "config",
+    sources_file: str | Path | None = None,
+) -> AppConfig:
     """Load and parse crawler, AI, and sources configurations from YAML files."""
     base_path = Path(config_dir)
 
@@ -159,16 +167,39 @@ def load_config(config_dir: str | Path = "config") -> AppConfig:
     ai_cfg.proxy_url = os.getenv("AIA_PROXY_URL", ai_cfg.proxy_url)
     ai_cfg.model = os.getenv("AIA_MODEL", ai_cfg.model)
 
-    # 3. Load sources config (fallback to sources.example.yaml if sources.yaml not found)
+    # 3. Load sources config
     sources_dict: dict[str, SourceConfig] = {}
-    sources_file = base_path / "sources.yaml"
-    if not sources_file.exists():
-        sources_file = base_path / "sources.example.yaml"
+    target_sources_path: Path | None = None
 
-    if sources_file.exists():
-        with open(sources_file, encoding="utf-8") as f:
+    if sources_file is not None:
+        p = Path(sources_file)
+        if p.exists():
+            target_sources_path = p
+        elif (base_path / sources_file).exists():
+            target_sources_path = base_path / sources_file
+        else:
+            target_sources_path = p
+    else:
+        default_path = base_path / "sources.yaml"
+        if default_path.exists():
+            target_sources_path = default_path
+        else:
+            target_sources_path = base_path / "sources.example.yaml"
+
+    if target_sources_path and target_sources_path.exists():
+        with open(target_sources_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-            raw_sources = data.get("sources", data)
+
+            # Override report title/tags if defined at top-level of sources file
+            if isinstance(data, dict):
+                if "title" in data and isinstance(data["title"], str):
+                    report_cfg.title = data["title"]
+                if "tags" in data and isinstance(data["tags"], list):
+                    report_cfg.tags = [str(t) for t in data["tags"]]
+                if "title_template" in data and isinstance(data["title_template"], str):
+                    report_cfg.title_template = data["title_template"]
+
+            raw_sources = data.get("sources", data) if isinstance(data, dict) else data
             if isinstance(raw_sources, dict):
                 for key, item in raw_sources.items():
                     if isinstance(item, dict):
