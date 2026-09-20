@@ -4,10 +4,25 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 
+from news_crawler import cli, coordinator
 from news_crawler.config import AIConfig
 from news_crawler.database import Database
 from news_crawler.models import Article, FetchMethod, SourceConfig
+
+
+@pytest.fixture(autouse=True)
+def plain_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make CLI output plain text regardless of the runner's environment.
+
+    rich builds the module-level ``console`` at import time and honours FORCE_COLOR
+    (set by some CI runners and agent shells), which puts ANSI codes inside the text
+    the tests assert on (e.g. ``Total New: \x1b[1;32m2``).
+    """
+    plain = Console(force_terminal=False, no_color=True, color_system=None)
+    monkeypatch.setattr(cli, "console", plain)
+    monkeypatch.setattr(coordinator, "console", plain)
 
 
 @pytest.fixture

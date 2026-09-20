@@ -15,6 +15,7 @@
 - **差分クロール・重複排除**: 正規化URLおよびコンテンツハッシュ（SHA-256）による未取得記事の差分収集。加えて、正規化タイトル完全一致によるクロスソース重複検出（`news-crawler dedupe`）で、別サイトが同じ発表を独自記事化したケースも代表記事へ集約。
 - **SQLite + FTS5 全文検索**: 高速なローカル全文検索により、馬名や騎手名での横断検索が可能。
 - **柔軟な設定管理**: `config/sources.yaml` で対象ソース・セレクター・取得頻度を一元管理。
+- **日付別ダイジェスト**: AI要約付きの記事一覧を `<年>/<YYYY-MM-DD>.md` として出力（`digest`）。
 - **Markdownレポート出力**: カテゴリ別・ソース別の新着記事サマリーおよびワードクラウド画像を自動生成。
 
 ---
@@ -243,17 +244,53 @@ uv run news-crawler search "重賞" --category official
 
 ---
 
-### AI要約・翻訳（オプション）
+### AI要約・翻訳（`enrich`）
 
-Ollama や OpenAI API 互換プロキシを介して、記事の日本語タイトル補正や短文要約を付与できます。
+DB に保存済みの記事（タイトル・要約・本文）を LLM に渡し、**日本語タイトルと 2〜3 文の日本語要約**を `articles.title_ja` / `summary_ja` に書き戻します（元の記事は変更しません。URL を開いて全文を取りに行くことはしないため、RSS 抜粋しか無い記事の要約はその範囲に限られます）。
 
 ```bash
-# AI要約を実行
+# 直近7日の未処理記事を最大50件処理
 uv run news-crawler enrich --days 7 --limit 50
 
 # 失敗した記事の再試行
 uv run news-crawler enrich --days 7 --retry-failed
+
+# 使うLLMを1つに固定（フォールバックしない）
+uv run news-crawler enrich --llm gemini
 ```
+
+**LLM エンドポイントと自動フォールバック**: `config/crawler.yaml` の `ai.endpoints` に OpenAI 互換のエンドポイントを定義し、`ai.endpoint_order` の先頭から順に、「到達でき、対象モデルがロード済み」の最初のものを使います（実行時に `LLM endpoint: ...` を表示）。
+
+| 順 | 名前 | 接続先 | モデル |
+| --- | --- | --- | --- |
+| 1 | `lmstudio_12b` | `localhost:1234`（LM Studio。LM Link 経由でリモート機のモデルが見える） | `google/gemma-4-12b-qat` |
+| 2 | `lmstudio_local` | `localhost:1234` | `google/gemma-4-e4b` |
+| 明示指定 | `gemini` | Google Gemini API（OpenAI 互換） | `gemini-2.5-flash-lite` |
+
+- `gemini` は既定の順序に入れていません（記事本文が外部に送られ、従量課金のため）。`--llm gemini` で明示したときだけ使います。API キーは `.env` に `GEMINI_API_KEY=...` と書きます（`.env` は Git 管理外）。
+- `endpoints` を空にすると、従来どおり `ai.proxy_url` / `ai.model`（環境変数 `AIA_PROXY_URL` / `AIA_MODEL` で上書き可）の単一エンドポイントで動きます。
+- **思考（reasoning）モデルでは `ai.max_tokens` を大きくします**。gemma-4 は思考トークンも `max_tokens` を消費し、上限が小さいと返答が空になって全件失敗します（既定 500 → `crawler.yaml` では 3000）。エンドポイントごとに `max_tokens` で上書きできます。
+- 速度の目安は 12b で約 15〜20 秒/件、e4b で約 10 秒/件です。全件処理は数時間かかるため、`--limit` で分けるかバックグラウンドで実行してください。
+
+---
+
+### 日付別ダイジェスト（`digest`）
+
+記事を公開日ごとにまとめ、AI要約付きの Markdown を**日付ごと・年ごとのフォルダ**に出力します。
+
+```bash
+uv run news-crawler digest                                   # 直近7日
+uv run news-crawler digest --days 30
+uv run news-crawler digest --start-date 2026-09-18 --end-date 2026-09-18   # 特定の日
+uv run news-crawler digest --only-summarized                 # AI要約済みの記事だけ
+uv run news-crawler digest -o /tmp/digests                   # 出力先の変更（試すときはこちら）
+```
+
+- 出力先は `<report.output_dir>/<YYYY>/<YYYY-MM-DD>.md`。**冪等**で、再実行はその日のファイルを上書きします（`enrich` の進行に合わせて流し直せます）。
+- 内容は front matter（`total_articles` / `ai_summarized` / `llm_models`）→ソース別（件数の多い順）→時刻の新しい順の「日本語タイトル（リンク）＋要約」。AI 未処理の記事は原題とリンクのみです。
+- **日単位で丸ごと出力**します。`--days N` は N 日前の同時刻から始まりますが、開始日は 0:00 に広げて取ります。指定範囲の外の日に振り分けられた記事は書き出さず、警告（`Skipped ...`）を出します（欠けたファイルで完全版を上書きしないため）。
+- 重複記事（`dedupe --apply` 済み）と `enabled: false` のソースは既定で除外します。
+- **既知の不具合**: スクレイパーが公開日を誤って未来（例: 2028-08-09）にした記事は、公開日で絞り込むためどの日のファイルにも入りません（2026-09-20 時点で競馬ラボの告知記事 1 件）。原因は未調査です。
 
 ---
 
@@ -306,6 +343,7 @@ news_crawler/
 │       ├── text_analyzer.py    # SudachiPy 形態素解析
 │       ├── visualization.py    # WordCloud / グラフ画像生成
 │       ├── reporting.py        # Markdown レポート生成
+│       ├── digest.py           # 日付別ダイジェスト（<年>/<日付>.md）
 │       ├── ai_processor.py     # AI要約プロセッサー
 │       └── adapters/           # 取得アダプター群 (RSS, HTML, Playwright等)
 ├── tests/                      # テストコード
