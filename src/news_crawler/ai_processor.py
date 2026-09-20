@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import re
 from collections.abc import Callable
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from news_crawler.config import AIConfig
+from news_crawler.config import AIConfig, AIEndpoint
 from news_crawler.database import Database
 from news_crawler.models import AIResponse, Article
 
@@ -27,6 +28,59 @@ class AIProcessor:
         self.config = config
         self.db = db
         self.sleeper = sleeper or asyncio.sleep
+        self.active_endpoint: str | None = None
+        self.only_endpoint: str | None = None
+        self._auth_env: str | None = None
+
+    def _api_key(self, endpoint: AIEndpoint) -> str | None:
+        return os.getenv(endpoint.api_key_env) if endpoint.api_key_env else None
+
+    async def _probe(self, endpoint: AIEndpoint) -> str | None:
+        """Return None if usable, else a short reason. Checks reachability and model ID."""
+        headers = {}
+        key = self._api_key(endpoint)
+        if endpoint.api_key_env and not key:
+            return f"env {endpoint.api_key_env} is not set"
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                r = await client.get(f"{endpoint.proxy_url}/models", headers=headers)
+            r.raise_for_status()
+            ids = {m.get("id", "").removeprefix("models/") for m in r.json().get("data", [])}
+        except Exception as e:  # unreachable / bad response
+            return f"{type(e).__name__}"
+        if endpoint.model not in ids:
+            return f"model {endpoint.model} not loaded"
+        return None
+
+    async def select_endpoint(self, only: str | None = None) -> str:
+        """Pick the first usable endpoint (or `only`) and apply it to self.config."""
+        cfg = self.config
+        if not cfg.endpoints:
+            self.active_endpoint = "default"
+            return "default"
+        by_name = {e.name: e for e in cfg.endpoints}
+        order = [only] if only else (cfg.endpoint_order or [e.name for e in cfg.endpoints])
+        reasons: list[str] = []
+        for name in order:
+            ep = by_name.get(name)
+            if ep is None:
+                raise ValueError(f"Unknown LLM endpoint: {name} (available: {', '.join(by_name)})")
+            reason = await self._probe(ep)
+            if reason is None:
+                self.config = cfg.model_copy(
+                    update={
+                        "proxy_url": ep.proxy_url,
+                        "model": ep.model,
+                        "max_tokens": ep.max_tokens or cfg.max_tokens,
+                    }
+                )
+                self._auth_env = ep.api_key_env
+                self.active_endpoint = name
+                return name
+            reasons.append(f"{name}: {reason}")
+        raise RuntimeError("No usable LLM endpoint (" + "; ".join(reasons) + ")")
 
     async def enrich_articles(
         self,
@@ -47,6 +101,8 @@ class AIProcessor:
 
         if not articles:
             return {"skipped": 0, "success": 0, "failed": 0, "total": 0}
+
+        await self.select_endpoint(self.only_endpoint)
 
         success_count = 0
         failed_count = 0
@@ -140,7 +196,7 @@ class AIProcessor:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": 500,
+            "max_tokens": self.config.max_tokens,
             "temperature": 0.3,
         }
 
@@ -151,9 +207,13 @@ class AIProcessor:
                     timeout=self.config.timeout_seconds,
                     follow_redirects=True,
                 ) as client:
+                    headers = {"Content-Type": "application/json"}
+                    key = os.getenv(self._auth_env) if self._auth_env else None
+                    if key:
+                        headers["Authorization"] = f"Bearer {key}"
                     response = await client.post(
                         f"{self.config.proxy_url}/chat/completions",
-                        headers={"Content-Type": "application/json"},
+                        headers=headers,
                         json=payload,
                     )
                     response.raise_for_status()

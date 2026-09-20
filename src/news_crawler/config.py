@@ -49,6 +49,20 @@ class CrawlerConfig(BaseModel):
     output_dir: str = Field(default="output", description="Output directory for reports")
 
 
+class AIEndpoint(BaseModel):
+    """One OpenAI-compatible LLM endpoint that enrichment can use."""
+
+    name: str = Field(description="Identifier used in ai.endpoint_order and --llm")
+    proxy_url: str = Field(description="OpenAI-compatible base URL (…/v1)")
+    model: str = Field(description="Model ID")
+    api_key_env: str | None = Field(
+        default=None, description="Env var holding the API key (Bearer). None = no auth"
+    )
+    max_tokens: int | None = Field(
+        default=None, description="Override ai.max_tokens for this endpoint"
+    )
+
+
 class AIConfig(BaseModel):
     """AI enrichment configuration."""
 
@@ -64,6 +78,18 @@ class AIConfig(BaseModel):
     max_input_chars: int = Field(default=8000, description="Max input characters per article")
     max_articles_per_run: int = Field(
         default=50, description="Max articles to process per enrich run"
+    )
+    max_tokens: int = Field(
+        default=500,
+        description="Max completion tokens (reasoning models need more, incl. thinking tokens)",
+    )
+    endpoints: list[AIEndpoint] = Field(
+        default_factory=list,
+        description="Selectable LLM endpoints. Empty = single endpoint from proxy_url/model",
+    )
+    endpoint_order: list[str] = Field(
+        default_factory=list,
+        description="Endpoint names tried in order; the first reachable one is used",
     )
     prompt_version: str = Field(default="1", description="Prompt version identifier")
     system_prompt: str = Field(

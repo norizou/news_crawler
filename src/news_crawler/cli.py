@@ -1,6 +1,7 @@
 """Command-line interface for AI Scraper."""
 
 import asyncio
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import click
@@ -12,6 +13,7 @@ from news_crawler.config import load_config
 from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
 from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
+from news_crawler.digest import write_digests
 from news_crawler.reporting import generate_markdown_report, resolve_report_period
 from news_crawler.target_exporter import TargetCommentExporter, get_latest_race_date
 
@@ -282,6 +284,12 @@ def report(
     help="Include failed articles in enrichment.",
 )
 @click.option(
+    "--llm",
+    type=str,
+    default=None,
+    help="Use only this endpoint from ai.endpoints (e.g. gemini). Default: ai.endpoint_order.",
+)
+@click.option(
     "--sources-file",
     "-f",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -298,6 +306,7 @@ def enrich(
     days: int,
     limit: int,
     retry_failed: bool,
+    llm: str | None,
     sources_file: Path | None,
     config_dir: Path,
 ) -> None:
@@ -310,12 +319,20 @@ def enrich(
 
     db = Database(app_config.crawler.database_path)
     processor = AIProcessor(app_config.ai, db)
+    processor.only_endpoint = llm
 
     console.print(f"Starting AI enrichment for articles from last {days} days...")
     console.print(f"Max articles: {limit}, Retry failed: {retry_failed}")
 
-    stats = asyncio.run(
-        processor.enrich_articles(days=days, limit=limit, retry_failed=retry_failed)
+    try:
+        stats = asyncio.run(
+            processor.enrich_articles(days=days, limit=limit, retry_failed=retry_failed)
+        )
+    except (RuntimeError, ValueError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1) from e
+    console.print(
+        f"LLM endpoint: [cyan]{processor.active_endpoint}[/cyan] ({processor.config.model})"
     )
 
     console.print("\n[bold]Enrichment Summary:[/bold]")
@@ -772,3 +789,86 @@ def export_comments(
 if __name__ == "__main__":
     main()
 
+
+
+@main.command()
+@click.option("--days", "-d", type=int, default=None, help="Last N days (default: 7).")
+@click.option("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD).")
+@click.option("--end-date", type=str, default=None, help="End date (YYYY-MM-DD).")
+@click.option(
+    "--only-summarized",
+    is_flag=True,
+    default=False,
+    help="Only list articles that have an AI summary (skip days with none).",
+)
+@click.option(
+    "--exclude-duplicates/--include-duplicates",
+    default=True,
+    help="Exclude cross-source duplicates marked by 'dedupe' (default: exclude).",
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Root directory (default: report.output_dir). Files go to <root>/<YYYY>/<date>.md.",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def digest(
+    days: int | None,
+    start_date: str | None,
+    end_date: str | None,
+    only_summarized: bool,
+    exclude_duplicates: bool,
+    output_dir: Path | None,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
+    """Write one Markdown file per date (<root>/<YYYY>/<YYYY-MM-DD>.md) with AI summaries."""
+    app_config = load_config(config_dir, sources_file=sources_file)
+    db = Database(app_config.crawler.database_path)
+    try:
+        start_at, end_at, _mode = resolve_report_period(
+            days if days is not None or start_date else 7, start_date, end_date, None
+        )
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from e
+
+    # Always cover whole days: `--days N` starts mid-day, which would otherwise write a
+    # truncated file for the oldest day and overwrite that day's complete digest.
+    start_at = datetime.combine(start_at.date(), time.min)
+    first_day, last_day = start_at.date(), (end_at - timedelta(microseconds=1)).date()
+
+    disabled = [k for k, src in app_config.sources.items() if not src.enabled]
+    articles = db.get_articles_in_range(
+        start_at,
+        end_at,
+        exclude_source_keys=disabled or None,
+        exclude_duplicates=exclude_duplicates,
+    )
+    root = output_dir or Path(app_config.report.output_dir or app_config.crawler.output_dir)
+    names = {k: src.name for k, src in app_config.sources.items()}
+    written, skipped = write_digests(
+        articles, root, names, only_summarized=only_summarized, day_range=(first_day, last_day)
+    )
+    for path, n in written:
+        console.print(f"  {path}  ({n})")
+    for day in skipped:
+        console.print(
+            f"[yellow]Skipped {day}: outside {first_day}..{last_day} "
+            "(re-dated article; writing it would overwrite that day's digest)[/yellow]"
+        )
+    console.print(f"[green]Wrote {len(written)} daily digest(s) under {root}[/green]")
