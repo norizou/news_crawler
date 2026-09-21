@@ -124,7 +124,6 @@ def generate_markdown_report(
         "total_articles": len(articles),
         "tags": cfg.tags,
         "visualization": cfg.visualize,
-        "analysis_top_n": cfg.top_n,
         "analysis_category": category,
         "period_mode": mode,
         "period_start": start_at.strftime("%Y-%m-%d"),

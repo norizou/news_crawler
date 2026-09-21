@@ -1,23 +1,13 @@
 crawler:
   download_delay: 1.5
-  concurrent_requests: 4
   user_agent: "News-Crawler/1.0 (+https://gitlab.dell.com/asain/news_crawler)"
   timeout_seconds: 30
-  retry_times: 3
-  retry_http_codes:
-    - 500
-    - 502
-    - 503
-    - 504
-    - 408
-    - 429
   database_path: "data/articles.db"
   output_dir: "output"
 
 report:
   output_dir: "/Users/norihito/Library/Mobile Documents/iCloud~md~obsidian/Documents/10_KEIBA/news_crawl"
   visualize: true
-  top_n: 20
   japanese_font_path: ""
   output_assets_name: "assets"
   wordcloud_width: 800

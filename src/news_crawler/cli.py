@@ -181,12 +181,6 @@ def crawl(
     help="Enable/disable word cloud (default: report.visualize in crawler.yaml).",
 )
 @click.option(
-    "--top-n",
-    type=click.IntRange(10, 50),
-    default=None,
-    help="Top N words for frequency analysis (default: 20).",
-)
-@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
@@ -205,7 +199,6 @@ def report(
     exclude_duplicates: bool,
     output: Path | None,
     visualize: bool | None,
-    top_n: int | None,
     config_dir: Path,
 ) -> None:
     """Generate Markdown report from crawled articles."""
@@ -226,8 +219,6 @@ def report(
         report_cfg.tags = parsed_tags
     if visualize is not None:
         report_cfg.visualize = visualize
-    if top_n is not None:
-        report_cfg.top_n = top_n
 
     if output is None:
         from datetime import datetime

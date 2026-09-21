@@ -17,7 +17,6 @@ def test_load_config_default(tmp_path: Path):
         """
 crawler:
   download_delay: 3.0
-  concurrent_requests: 2
   database_path: "data/custom.db"
 """,
         encoding="utf-8",
@@ -44,7 +43,6 @@ sources:
 
     app_config = load_config(cfg_dir)
     assert app_config.crawler.download_delay == 3.0
-    assert app_config.crawler.concurrent_requests == 2
     assert "openai" in app_config.sources
     assert app_config.sources["openai"].fetch_method == FetchMethod.RSS
     assert app_config.sources["openai"].name == "OpenAI News"

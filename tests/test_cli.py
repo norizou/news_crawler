@@ -124,14 +124,6 @@ def test_cli_report_visualize_options(cli_config_dir: Path):
     res = runner.invoke(main, ["report", "--no-visualize", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 0
 
-    # 2. Top-n
-    res = runner.invoke(main, ["report", "--top-n", "15", "--config-dir", str(cli_config_dir)])
-    assert res.exit_code == 0
-
-    # 3. Invalid top-n (out of range)
-    res = runner.invoke(main, ["report", "--top-n", "5", "--config-dir", str(cli_config_dir)])
-    assert res.exit_code == 2 # Click usage error
-
 
 def test_cli_report_excludes_disabled_sources_by_default(cli_config_dir: Path, tmp_path: Path):
     """Articles from a source disabled in sources.yaml (e.g. after a Google News

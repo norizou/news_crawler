@@ -34,17 +34,11 @@ class CrawlerConfig(BaseModel):
     """Crawler engine configuration."""
 
     download_delay: float = Field(default=2.0, description="Delay between requests in seconds")
-    concurrent_requests: int = Field(default=4, description="Max concurrent requests")
     user_agent: str = Field(
         default="News-Crawler/1.0 (+https://gitlab.dell.com/asain/news_crawler)",
         description="User-Agent string",
     )
     timeout_seconds: int = Field(default=30, description="HTTP request timeout")
-    retry_times: int = Field(default=3, description="Retry attempts for failed requests")
-    retry_http_codes: list[int] = Field(
-        default_factory=lambda: [500, 502, 503, 504, 408, 429],
-        description="HTTP status codes to retry",
-    )
     database_path: str = Field(default="data/articles.db", description="Path to SQLite database")
     output_dir: str = Field(default="output", description="Output directory for reports")
 
@@ -138,7 +132,6 @@ class ReportConfig(BaseModel):
         default=None, description="Output directory for reports (overrides crawler.output_dir)"
     )
     visualize: bool = Field(default=False, description="Enable visualization")
-    top_n: int = Field(default=20, description="Top N words for frequency chart")
     japanese_font_path: str = Field(default="", description="Path to Japanese font file")
     output_assets_name: str = Field(default="assets", description="Name of assets directory")
     wordcloud_width: int = Field(default=800, description="Word cloud width")
