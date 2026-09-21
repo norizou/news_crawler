@@ -77,10 +77,13 @@ uv run news-crawler export-comments --race ながつき
 uv run news-crawler export-comments --date 2026-09-19 --venue 中山
 ```
 
-> **AI エージェントは `uv run` の前に `UV_PROJECT_ENVIRONMENT` を確認すること。**
-> エージェントのシェルは `~/.zshrc` の venv 自動切替フックを読まないため、未設定だと `uv` が
-> プロジェクト直下に `.venv` を作り直してしまう（規約違反・611MB）。Claude Code は
-> `.claude/settings.local.json` で自動設定済み。**それ以外のエージェントは毎回こう書く**:
+> **プロジェクト直下の `.venv` は `~/.virtualenvs/news_crawler` へのシンボリックリンク**（実体ではない）。
+> `uv` は標準の探索パスでこれを見つけるため、環境変数なしで `uv run` が中央 venv を使う。
+> リンクが消えた場合は `ln -s ~/.virtualenvs/news_crawler .venv` で戻す。
+>
+> エージェントのシェルは `~/.zshrc` の venv 自動切替フックを読まないため、リンクも無い状態で
+> `uv run` すると直下に `.venv` の実体を作り直してしまう（規約違反・500MB 超）。Claude Code は
+> `.claude/settings.local.json` でも設定済み。**リンクに頼れない場合は毎回こう書く**:
 >
 > ```bash
 > cd ~/Projects/Dev/news_crawler
@@ -127,6 +130,7 @@ npm run lint:fix
    - `gemini` は外部送信・従量課金のため既定の順序に入れない。キーは `.env` の `GEMINI_API_KEY`（Git に入れない）。
    - **思考モデルは `max_tokens` を大きくする**（gemma-4 は思考トークンも消費する。500 だと `content` が空になり全件 `Invalid AI response format` で失敗）。
    - 記録される `ai_model` は実際に使ったモデル。
+   - **`ai.prompt_version` を上げると、旧バージョンで処理済みの記事も次回 `enrich` の対象になる**（`get_pending_articles` が `ai_prompt_version` の不一致を拾う）。`system_prompt` を変えたら必ず上げる。`--limit` 省略時は `ai.max_articles_per_run`。
    - LM Studio が一時的に応答しないと `400 Bad Request` で失敗することがある。`--retry-failed` で再試行する。
 
 5. **日時は naive JST で保存する**:

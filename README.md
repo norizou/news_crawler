@@ -156,8 +156,8 @@ uv run python scripts/build_keiba_dict.py dict/keiba_dict.csv \
 # 直近7日間のレポートを生成（可視化あり）
 uv run news-crawler report
 
-# 期間指定（例: 直近30日間、頻出上位15単語）
-uv run news-crawler report --days 30 --top-n 15
+# 期間指定（例: 直近30日間）
+uv run news-crawler report --days 30
 
 # 日付範囲指定
 uv run news-crawler report --start-date 2026-09-01 --end-date 2026-09-14
@@ -271,6 +271,8 @@ uv run news-crawler enrich --llm gemini
 - `gemini` は既定の順序に入れていません（記事本文が外部に送られ、従量課金のため）。`--llm gemini` で明示したときだけ使います。API キーは `.env` に `GEMINI_API_KEY=...` と書きます（`.env` は Git 管理外）。
 - `endpoints` を空にすると、従来どおり `ai.proxy_url` / `ai.model`（環境変数 `AIA_PROXY_URL` / `AIA_MODEL` で上書き可）の単一エンドポイントで動きます。
 - **思考（reasoning）モデルでは `ai.max_tokens` を大きくします**。gemma-4 は思考トークンも `max_tokens` を消費し、上限が小さいと返答が空になって全件失敗します（既定 500 → `crawler.yaml` では 3000）。エンドポイントごとに `max_tokens` で上書きできます。
+- **プロンプトを変えたら `ai.prompt_version` を上げます**（例: `"1"` → `"2"`）。次回の `enrich` で、旧バージョンで処理済みの記事も再要約の対象になります（公開日の新しい順に `--limit` 件ずつ）。上げなければ処理済み記事は再処理されません。
+- `--limit` を省略すると `ai.max_articles_per_run`（既定 50）を使います。
 - 速度の目安は 12b で約 15〜20 秒/件、e4b で約 10 秒/件です。全件処理は数時間かかるため、`--limit` で分けるかバックグラウンドで実行してください。
 
 ---
