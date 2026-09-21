@@ -345,6 +345,74 @@ def test_get_pending_articles(temp_db: Database, sample_source: SourceConfig):
     assert len(pending) == 2  # Should exclude completed
 
 
+def test_get_pending_articles_picks_up_stale_prompt_version(
+    temp_db: Database, sample_source: SourceConfig
+):
+    """Bumping ai.prompt_version re-queues articles enriched under the old prompt."""
+    temp_db.upsert_source(sample_source)
+    temp_db.upsert_article(
+        Article(
+            source_key="test_source",
+            url="https://example.com/done",
+            normalized_url="https://example.com/done",
+            title="Done",
+            content="Content",
+            published_at=datetime.now(),
+            category="official",
+        )
+    )
+    done = temp_db.get_recent_articles(days=7, limit=1)[0]
+    temp_db.save_ai_result(
+        article_id=done.id,
+        title_ja="完了",
+        summary_ja="完了要約",
+        model="test-model",
+        prompt_version="1",
+        input_hash="hash",
+    )
+
+    # Same version: nothing to do. Omitting the argument keeps the old behaviour.
+    assert temp_db.get_pending_articles(days=7, limit=10, prompt_version="1") == []
+    assert temp_db.get_pending_articles(days=7, limit=10) == []
+
+    # Bumped version: the completed article comes back for re-enrichment.
+    stale = temp_db.get_pending_articles(days=7, limit=10, prompt_version="2")
+    assert [a.id for a in stale] == [done.id]
+
+
+def test_get_pending_articles_skips_duplicates_with_stale_prompt_version(
+    temp_db: Database, sample_source: SourceConfig
+):
+    """A marked duplicate stays excluded even when its prompt version is stale."""
+    temp_db.upsert_source(sample_source)
+    for i in range(2):
+        temp_db.upsert_article(
+            Article(
+                source_key="test_source",
+                url=f"https://example.com/dup-{i}",
+                normalized_url=f"https://example.com/dup-{i}",
+                title=f"Dup {i}",
+                content="Content",
+                published_at=datetime.now(),
+                category="official",
+            )
+        )
+    canonical, duplicate = temp_db.get_recent_articles(days=7, limit=2)
+    for art in (canonical, duplicate):
+        temp_db.save_ai_result(
+            article_id=art.id,
+            title_ja="完了",
+            summary_ja="完了要約",
+            model="test-model",
+            prompt_version="1",
+            input_hash="hash",
+        )
+    temp_db.mark_duplicate(duplicate.id, canonical.id, 1.0)
+
+    stale = temp_db.get_pending_articles(days=7, limit=10, prompt_version="2")
+    assert [a.id for a in stale] == [canonical.id]
+
+
 def test_save_ai_result(temp_db: Database, sample_source: SourceConfig):
     """Test saving AI enrichment results."""
     temp_db.upsert_source(sample_source)

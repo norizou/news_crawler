@@ -275,8 +275,8 @@ def report(
     "--limit",
     "-l",
     type=int,
-    default=50,
-    help="Max articles to process (default: 50).",
+    default=None,
+    help="Max articles to process (default: ai.max_articles_per_run).",
 )
 @click.option(
     "--retry-failed",
@@ -305,7 +305,7 @@ def report(
 )
 def enrich(
     days: int,
-    limit: int,
+    limit: int | None,
     retry_failed: bool,
     llm: str | None,
     sources_file: Path | None,
@@ -317,6 +317,9 @@ def enrich(
     if not app_config.ai.enabled:
         console.print("[yellow]AI enrichment is disabled in configuration.[/yellow]")
         return
+
+    if limit is None:
+        limit = app_config.ai.max_articles_per_run
 
     db = Database(app_config.crawler.database_path)
     processor = AIProcessor(app_config.ai, db)

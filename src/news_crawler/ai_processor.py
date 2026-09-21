@@ -96,7 +96,10 @@ class AIProcessor:
             return {"skipped": 0, "success": 0, "failed": 0, "total": 0}
 
         articles = self.db.get_pending_articles(
-            days=days, limit=limit, retry_failed=retry_failed
+            days=days,
+            limit=limit,
+            retry_failed=retry_failed,
+            prompt_version=self.config.prompt_version,
         )
 
         if not articles:

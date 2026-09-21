@@ -601,20 +601,34 @@ class Database:
         days: int = 7,
         limit: int = 50,
         retry_failed: bool = False,
+        prompt_version: str | None = None,
     ) -> list[Article]:
-        """Get articles pending AI enrichment within the last N days."""
-        cutoff_iso = (datetime.now() - timedelta(days=days)).isoformat()
+        """Get articles needing AI enrichment within the last N days.
 
-        query = """
-            SELECT * FROM articles
-            WHERE (published_at >= ? OR (published_at IS NULL AND fetched_at >= ?))
-            AND ai_status = 'pending'
-            AND duplicate_of_id IS NULL
+        ``prompt_version`` additionally selects already-completed articles that
+        were enriched under a different prompt version, so bumping
+        ``ai.prompt_version`` re-summarizes them with the new system prompt.
         """
+        cutoff_iso = (datetime.now() - timedelta(days=days)).isoformat()
         params: list[Any] = [cutoff_iso, cutoff_iso]
 
+        status_conditions = ["ai_status = 'pending'"]
         if retry_failed:
-            query = query.replace("ai_status = 'pending'", "ai_status IN ('pending', 'failed')")
+            status_conditions.append("ai_status = 'failed'")
+        if prompt_version is not None:
+            # Rows predating the column get '1' from the ALTER TABLE default,
+            # but COALESCE guards against any that slipped through as NULL.
+            status_conditions.append(
+                "(ai_status = 'completed' AND COALESCE(ai_prompt_version, '1') != ?)"
+            )
+            params.append(prompt_version)
+
+        query = f"""
+            SELECT * FROM articles
+            WHERE (published_at >= ? OR (published_at IS NULL AND fetched_at >= ?))
+            AND ({" OR ".join(status_conditions)})
+            AND duplicate_of_id IS NULL
+        """
 
         query += " ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT ?"
         params.append(limit)
