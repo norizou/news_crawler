@@ -15,6 +15,7 @@
 - **差分クロール・重複排除**: 正規化URLおよびコンテンツハッシュ（SHA-256）による未取得記事の差分収集。加えて、正規化タイトル完全一致によるクロスソース重複検出（`news-crawler dedupe`）で、別サイトが同じ発表を独自記事化したケースも代表記事へ集約。
 - **SQLite + FTS5 全文検索**: 高速なローカル全文検索により、馬名や騎手名での横断検索が可能。
 - **柔軟な設定管理**: `config/sources.yaml` で対象ソース・セレクター・取得頻度を一元管理。
+- **日時は JST に統一**: `published_at` は取り込み時にすべて naive JST で保存します（UTC 表記のソースも変換）。旧データは `scripts/normalize_published_at.py --apply` で一度だけ変換します。
 - **日付別ダイジェスト**: AI要約付きの記事一覧を `<年>/<YYYY-MM-DD>.md` として出力（`digest`）。
 - **Markdownレポート出力**: カテゴリ別・ソース別の新着記事サマリーおよびワードクラウド画像を自動生成。
 
@@ -39,7 +40,7 @@ graph TD
     DD --> DB
     DB --> O[レポート・分析生成]
     O --> M[Markdownレポート]
-    O --> W[WordCloud / グラフ画像]
+    O --> W[WordCloud 画像]
 
     style S fill:#e3f2fd
     style T fill:#fff3cd
@@ -149,7 +150,7 @@ uv run python scripts/build_keiba_dict.py dict/keiba_dict.csv \
 
 ### レポートの生成と単語頻度の可視化
 
-収集した記事からMarkdownレポートを生成します。既定でワードクラウドと単語頻度パイチャートが作成されます。
+収集した記事からMarkdownレポートを生成します。`report.visualize: true`（`config/crawler.yaml`）ならワードクラウドが作成されます。
 
 ```bash
 # 直近7日間のレポートを生成（可視化あり）
@@ -175,7 +176,7 @@ uv run news-crawler report --period month --exclude-source some_other_source
 uv run news-crawler report --period month --exclude-duplicates
 ```
 
-「原文」ワードクラウド・パイチャートは、まず SudachiPy による日本語の形態素解析を試み、結果が空の場合のみ英数字抽出にフォールバックします。日本語フォントは `_detect_japanese_font()` が代表的なインストールパスを自動探索し、見つからない場合は matplotlib が認識済みのフォント一覧から CJK 対応フォント（Hiragino・Noto Sans JP 等）を名前で検索します。特定のフォントを使いたい場合は `config/crawler.yaml` の `report.japanese_font_path` で明示指定できます。
+「原文」ワードクラウドは、まず SudachiPy による日本語の形態素解析を試み、結果が空の場合のみ英数字抽出にフォールバックします。日本語フォントは `_detect_japanese_font()` が代表的なインストールパスを自動探索し、見つからない場合は matplotlib が認識済みのフォント一覧から CJK 対応フォント（Hiragino・Noto Sans JP 等）を名前で検索します。特定のフォントを使いたい場合は `config/crawler.yaml` の `report.japanese_font_path` で明示指定できます。
 
 ---
 
@@ -329,6 +330,7 @@ news_crawler/
 ├── dict/                       # ユーザー辞書用CSV / バイナリ格納先
 ├── scripts/
 │   ├── build_keiba_dict.py     # 競馬辞書ビルドスクリプト (PC-KEIBA連携対応)
+│   ├── normalize_published_at.py # published_at を naive JST に統一する一回限りのマイグレーション
 │   └── infer_keiba_crowns.py   # 冠名候補抽出スクリプト (PC-KEIBA連携)
 ├── src/
 │   └── news_crawler/
@@ -341,10 +343,12 @@ news_crawler/
 │       ├── normalizer.py       # URL・本文・タイトル正規化
 │       ├── dedupe.py           # クロスソース重複検出（正規化タイトル完全一致）
 │       ├── text_analyzer.py    # SudachiPy 形態素解析
-│       ├── visualization.py    # WordCloud / グラフ画像生成
+│       ├── visualization.py    # WordCloud 画像生成
 │       ├── reporting.py        # Markdown レポート生成
 │       ├── digest.py           # 日付別ダイジェスト（<年>/<日付>.md）
 │       ├── ai_processor.py     # AI要約プロセッサー
+│       ├── target_exporter.py  # TARGET frontier JV 向けレースコメントCSV出力
+│       ├── utils.py            # SSL 検証など共通ユーティリティ
 │       └── adapters/           # 取得アダプター群 (RSS, HTML, Playwright等)
 ├── tests/                      # テストコード
 ├── data/                       # SQLite DB 保存先 (articles.db)

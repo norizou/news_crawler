@@ -6,6 +6,7 @@
 - **ローカルパス**: `~/Projects/Dev/news_crawler/`
 - **出力先**: レポート・日付別ダイジェストは Obsidian Vault `10_KEIBA/news_crawl/`（`config/crawler.yaml` の `report.output_dir`。Vault 側の手順書 `Docs/SKILL/news_crawler.md` が正本）
 - **言語**: Python 3.13+ (uv) + Node.js (Markdown Lint)
+- **仮想環境**: `~/.virtualenvs/news_crawler`（プロジェクト直下に `.venv` を作らない）
 
 ---
 
@@ -15,7 +16,7 @@
 | --- | --- |
 | 言語 | Python 3.13+ |
 | パッケージマネージャ | `uv` (`pyproject.toml`, `uv.lock`) |
-| スクレイピング | Scrapy, scrapy-playwright, Playwright, feedparser, beautifulsoup4 |
+| スクレイピング | httpx + beautifulsoup4（HTML）, feedparser（RSS）, Playwright（動的サイト） |
 | データベース | SQLite 3 (WAL モード, FTS5 全文検索) |
 | 設定管理 | PyYAML, Pydantic v2 |
 | ドキュメント Lint | markdownlint-cli, textlint (preset-ja-technical-writing) |
@@ -76,6 +77,16 @@ uv run news-crawler export-comments --race ながつき
 uv run news-crawler export-comments --date 2026-09-19 --venue 中山
 ```
 
+> **AI エージェントは `uv run` の前に `UV_PROJECT_ENVIRONMENT` を確認すること。**
+> エージェントのシェルは `~/.zshrc` の venv 自動切替フックを読まないため、未設定だと `uv` が
+> プロジェクト直下に `.venv` を作り直してしまう（規約違反・611MB）。Claude Code は
+> `.claude/settings.local.json` で自動設定済み。**それ以外のエージェントは毎回こう書く**:
+>
+> ```bash
+> cd ~/Projects/Dev/news_crawler
+> UV_PROJECT_ENVIRONMENT=~/.virtualenvs/news_crawler uv run pytest
+> ```
+
 ### 静的解析・テスト
 
 ```bash
@@ -99,7 +110,7 @@ npm run lint:fix
 
 1. **取得方式の優先順位**:
    - `RSS / API` を最優先（低負荷・高安定性）
-   - RSS がない場合は `Scrapy`（静的 HTML）
+   - RSS がない場合は `httpx + BeautifulSoup`（静的 HTML）
    - JS レンダリングが不可欠な場合のみ `Playwright` を使用
 
 2. **データ永続化 (SQLite + FTS5)**:
@@ -109,7 +120,7 @@ npm run lint:fix
 3. **公開リポジトリのセキュリティ & クリーン性**:
    - 秘密情報（API キー、Webhook URL 等）や取得データ本体は Git にコミットしない。
    - `config/sources.example.yaml` をテンプレートとして公開し、実運用設定は `config/sources.yaml` で管理。
-   - Windows Node.js への依存を排除し、WSL2 ネイティブ環境で完結させる。
+   - 本ブランチ（`mac-local`）は macOS ネイティブ環境で完結させる（Windows / WSL2 は前提にしない）。
 
 4. **AI 要約（`enrich`）の LLM 選択**:
    - `ai.endpoint_order`（既定: `lmstudio_12b` → `lmstudio_local`）を先頭から試し、`/models` に応答し対象モデルがロード済みの最初のエンドポイントを使う。`--llm NAME` はその1つだけを使う。
@@ -118,7 +129,11 @@ npm run lint:fix
    - 記録される `ai_model` は実際に使ったモデル。
    - LM Studio が一時的に応答しないと `400 Bad Request` で失敗することがある。`--retry-failed` で再試行する。
 
-5. **日付別ダイジェスト（`digest`）は日単位で丸ごと書く冪等な出力**:
+5. **日時は naive JST で保存する**:
+   - `normalizer.parse_datetime()` がオフセット付き（`Z` / `+00:00` / `+09:00`）を JST に変換してオフセットを外す。SQLite 上の範囲検索は文字列比較のため、表記を統一しないと日付境界がずれる。
+   - 旧データ（オフセット付き混在）は `scripts/normalize_published_at.py --apply` で一括変換済み（冪等。バックアップを自動作成）。
+
+6. **日付別ダイジェスト（`digest`）は日単位で丸ごと書く冪等な出力**:
    - 範囲の外の日に振り分けられた記事は書き出さない（既存の完全版ファイルを断片で上書きしないため）。試すときは `-o /tmp/...` で別の場所に出す。
    - **既知の不具合**: 公開日が未来になった記事（例: id 311・競馬ラボ・2028-08-09）はどの日にも入らない。原因未調査。
 

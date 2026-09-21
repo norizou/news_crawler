@@ -22,6 +22,12 @@ wheels/
 
 # Virtual Environment
 .venv/
+# 中央 venv (~/.virtualenvs/news_crawler) へのシンボリックリンク。
+# 末尾スラッシュ付きの '.venv/' はディレクトリのみ一致するため、リンク用に別途指定する。
+.venv
+
+# Claude Code のローカル設定（絶対パスを含むため共有しない）
+.claude/settings.local.json
 env/
 venv/
 ENV/
