@@ -67,3 +67,10 @@ def test_write_digests_writes_days_inside_range(tmp_path):
         [_art()], tmp_path, {}, day_range=(date(2026, 9, 19), date(2026, 9, 19))
     )
     assert [p.name for p, _ in written] == ["2026-09-19.md"] and skipped == []
+
+
+def test_write_digests_only_summarized_counts_filtered_items(tmp_path):
+    done = _art(url="https://example.com/a", ai_status="completed", summary_ja="要約")
+    pending = _art(url="https://example.com/b")
+    written, _ = write_digests([done, pending], tmp_path, {}, only_summarized=True)
+    assert [n for _, n in written] == [1]

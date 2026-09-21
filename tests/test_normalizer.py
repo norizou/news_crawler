@@ -43,3 +43,15 @@ def test_parse_datetime_invalid():
     assert parse_datetime(None) is None
     assert parse_datetime("") is None
     assert parse_datetime("invalid-date-string") is None
+
+
+def test_parse_datetime_converts_aware_to_naive_jst():
+    dt = parse_datetime("2026-09-20T11:16:11.666000+00:00")
+    assert dt == datetime(2026, 9, 20, 20, 16, 11, 666000)
+    assert dt.tzinfo is None
+    assert parse_datetime("2026-09-14T10:00:00Z") == datetime(2026, 9, 14, 19, 0)
+    assert parse_datetime("2026-09-20T20:16:11+09:00") == datetime(2026, 9, 20, 20, 16, 11)
+
+
+def test_parse_datetime_naive_is_kept_as_jst():
+    assert parse_datetime("2026-09-20 20:16") == datetime(2026, 9, 20, 20, 16)

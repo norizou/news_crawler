@@ -8,7 +8,7 @@ import pytest
 from news_crawler.config import ReportConfig
 from news_crawler.database import Database
 from news_crawler.models import Article, FetchMethod, SourceConfig
-from news_crawler.reporting import generate_markdown_report
+from news_crawler.reporting import generate_markdown_report, resolve_report_period
 
 
 def test_generate_markdown_report(tmp_path: Path):
@@ -298,3 +298,11 @@ def test_generate_markdown_report_failed_ai_fallback(tmp_path: Path):
     assert report_file.exists()
     assert "OpenAI Test Model Release" in md  # Original title should be used
     assert "A summary of the new release." in md  # Original summary should be used
+
+
+def test_resolve_report_period_reversed_range_message():
+    import pytest
+
+    with pytest.raises(ValueError, match="start-date must be before end-date") as exc:
+        resolve_report_period(start_date="2026-09-20", end_date="2026-09-01")
+    assert "Invalid date format" not in str(exc.value)

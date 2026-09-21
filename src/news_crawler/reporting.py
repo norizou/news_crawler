@@ -38,17 +38,14 @@ def resolve_report_period(
             raise ValueError("start-date is required when using date range.")
         try:
             start_at = datetime.fromisoformat(start_date)
-            if end_date:
-                # Up to the end of the specified day
-                end_at = datetime.fromisoformat(end_date) + timedelta(days=1)
-            else:
-                end_at = now
-
-            if start_at > end_at:
-                raise ValueError("start-date must be before end-date.")
-            return start_at, end_at, "date_range"
+            # Up to the end of the specified day
+            end_at = datetime.fromisoformat(end_date) + timedelta(days=1) if end_date else now
         except ValueError as e:
-            raise ValueError(f"Invalid date format (use YYYY-MM-DD): {e}")
+            raise ValueError(f"Invalid date format (use YYYY-MM-DD): {e}") from e
+
+        if start_at > end_at:
+            raise ValueError("start-date must be before end-date.")
+        return start_at, end_at, "date_range"
 
     if period:
         if period == "week":

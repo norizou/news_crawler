@@ -258,3 +258,9 @@ sources:
     assert "Successfully exported 1 race comment(s)" in res.output
     assert "2026091906040511" in res.output
     assert "ながつきS" in res.output
+
+
+def test_parse_race_metadata_does_not_match_stray_v():
+    # "TV" / "Vol" must not be mistaken for a "V" (win) marker
+    assert parse_race_metadata("中山11R TV中継のお知らせ Vol.3", "中山11Rの案内") is None
+    assert parse_race_metadata("【中山4R・2歳新馬】マートングレイスが初陣V", "") is not None

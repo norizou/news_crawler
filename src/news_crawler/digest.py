@@ -104,9 +104,11 @@ def write_digests(
         if day_range is not None and not day_range[0] <= day <= day_range[1]:
             skipped.append(day)
             continue
+        if only_summarized:
+            items = [a for a in items if a.ai_status == "completed"]
+            if not items:
+                continue
         body = render_day(day, items, source_names, only_summarized=only_summarized)
-        if only_summarized and not any(a.ai_status == "completed" for a in items):
-            continue
         path = root / f"{day.year}" / f"{day.isoformat()}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")

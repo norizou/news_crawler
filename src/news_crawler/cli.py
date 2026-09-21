@@ -172,18 +172,19 @@ def crawl(
     "-o",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="Output markdown file path (default: output/report_YYYYMMDD.md).",
+    help="Output markdown file path "
+    "(default: <report.output_dir>/weekly_report_YYYYMMDD.md).",
 )
 @click.option(
     "--visualize/--no-visualize",
     default=None,
-    help="Enable/disable word cloud and charts (default: disabled).",
+    help="Enable/disable word cloud (default: report.visualize in crawler.yaml).",
 )
 @click.option(
     "--top-n",
     type=click.IntRange(10, 50),
     default=None,
-    help="Top N words for frequency charts (default: 20).",
+    help="Top N words for frequency analysis (default: 20).",
 )
 @click.option(
     "--config-dir",
@@ -713,6 +714,7 @@ def export_comments(
                 s_nichi = int(items[2].strip())
                 schedule_overrides[s_venue] = (s_kai, s_nichi)
 
+    disabled_source_keys = [key for key, src in app_config.sources.items() if not src.enabled]
     exporter = TargetCommentExporter(db)
     comments = exporter.extract_race_comments(
         target_date=target_date,
@@ -722,6 +724,7 @@ def export_comments(
         manual_kai=kai,
         manual_nichi=nichi,
         schedule_overrides=schedule_overrides or None,
+        exclude_source_keys=disabled_source_keys or None,
     )
 
     if not comments:
@@ -785,9 +788,6 @@ def export_comments(
         f"  3. [cyan]{out_path}[/cyan] を指定して取り込みを実行（上書き／後に結合 等を選択）\n"
     )
 
-
-if __name__ == "__main__":
-    main()
 
 
 
@@ -872,3 +872,7 @@ def digest(
             "(re-dated article; writing it would overwrite that day's digest)[/yellow]"
         )
     console.print(f"[green]Wrote {len(written)} daily digest(s) under {root}[/green]")
+
+
+if __name__ == "__main__":
+    main()

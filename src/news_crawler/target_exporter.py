@@ -9,7 +9,7 @@ import io
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -215,11 +215,11 @@ def parse_race_metadata(
     )
     result_words = [
         "勝利した", "制す", "差し切る", "逃げ切る", "デビューv",
-        "初勝利", "v", "勝!", "勝達成", "着",
+        "初勝利", "初陣v", "初v", "勝!", "勝達成",
     ]
-    has_result = any(
-        w in norm_title.lower() or w in norm_content[:200].lower()
-        for w in result_words
+    result_head = f"{norm_title.lower()}\n{norm_content[:200].lower()}"
+    has_result = any(w in result_head for w in result_words) or bool(
+        re.search(r"\d+着", result_head)
     )
 
     if not (has_comment or has_result):
@@ -283,6 +283,7 @@ class TargetCommentExporter:
         manual_kai: int | None = None,
         manual_nichi: int | None = None,
         schedule_overrides: dict[str, tuple[int, int]] | None = None,
+        exclude_source_keys: list[str] | None = None,
     ) -> list[RaceCommentItem]:
         """
         Extract race comment items for the given date, filtered by race/venue/number.
@@ -291,7 +292,9 @@ class TargetCommentExporter:
         dt = datetime.strptime(target_date, "%Y-%m-%d")
         articles = self.db.get_articles_in_range(
             start_at=dt,
-            end_at=datetime(dt.year, dt.month, dt.day, 23, 59, 59),
+            end_at=dt + timedelta(days=1),
+            exclude_source_keys=exclude_source_keys,
+            exclude_duplicates=True,
         )
 
         # Get schedule mapping (kai, nichi)

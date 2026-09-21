@@ -5,8 +5,13 @@ import re
 import unicodedata
 from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from zoneinfo import ZoneInfo
 
 from dateutil import parser as date_parser
+
+# All timestamps are stored as naive JST so string comparison in SQLite stays consistent
+# regardless of whether a source emits UTC ("Z"/+00:00), +09:00 or no offset at all.
+JST = ZoneInfo("Asia/Tokyo")
 
 # Tracking parameters to strip from URLs
 TRACKING_PARAMS = {
@@ -118,14 +123,19 @@ def parse_datetime(date_str: str | None) -> datetime | None:
     )
 
     try:
-        dt = date_parser.parse(cleaned)
-        # If timezone-aware, keep or convert
-        return dt
+        return _to_naive_jst(date_parser.parse(cleaned))
     except (ValueError, TypeError, OverflowError):
         pass
 
     # Retry tolerating trailing/embedded non-date text (e.g. "2026/09/17 12:24更新")
     try:
-        return date_parser.parse(cleaned, fuzzy=True)
+        return _to_naive_jst(date_parser.parse(cleaned, fuzzy=True))
     except (ValueError, TypeError, OverflowError):
         return None
+
+
+def _to_naive_jst(dt: datetime) -> datetime:
+    """Convert a timezone-aware datetime to naive JST; naive values are assumed to be JST."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(JST).replace(tzinfo=None)

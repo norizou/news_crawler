@@ -106,13 +106,16 @@ class AIProcessor:
 
         success_count = 0
         failed_count = 0
+        skipped_count = 0
 
         for idx, article in enumerate(articles):
             if article.id is None:
                 continue
             try:
-                await self._enrich_single_article(article)
-                success_count += 1
+                if await self._enrich_single_article(article):
+                    success_count += 1
+                else:
+                    skipped_count += 1
             except Exception as e:
                 self.db.save_ai_failure(article.id, str(e))
                 failed_count += 1
@@ -122,14 +125,14 @@ class AIProcessor:
                 await self.sleeper(self.config.request_interval)
 
         return {
-            "skipped": 0,
+            "skipped": skipped_count,
             "success": success_count,
             "failed": failed_count,
             "total": len(articles),
         }
 
-    async def _enrich_single_article(self, article: Article) -> None:
-        """Enrich a single article with AI-generated content."""
+    async def _enrich_single_article(self, article: Article) -> bool:
+        """Enrich a single article. Returns False if skipped (already up to date)."""
         # Skip if already completed with same input hash
         input_hash = self._compute_input_hash(article)
         if (
@@ -138,7 +141,7 @@ class AIProcessor:
             and article.ai_model == self.config.model
             and article.ai_prompt_version == self.config.prompt_version
         ):
-            return
+            return False
 
         # Prepare input text
         input_text = self._prepare_input_text(article)
@@ -159,6 +162,7 @@ class AIProcessor:
                 prompt_version=self.config.prompt_version,
                 input_hash=input_hash,
             )
+        return True
 
     def _compute_input_hash(self, article: Article) -> str:
         """Compute hash of input data for change detection."""
@@ -223,6 +227,7 @@ class AIProcessor:
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429:
                     # Respect Retry-After header
+                    last_error = e
                     retry_after = int(e.response.headers.get("Retry-After", 5))
                     await self.sleeper(retry_after)
                     continue
