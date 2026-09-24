@@ -69,7 +69,11 @@ sources:
     fetch_method: "html"
     enabled: true
     base_url: "https://www.radionikkei.jp/"
-    list_url: "https://www.radionikkei.jp/keiba/"
+    # 主要ソース化（2026/09/24）: トップページ(最新6件程度)ではレース数の多い開催日に
+    # 記事が取りこぼされるため、月別アーカイブを既定ソースにして網羅的に取得する。
+    # %Y/%m はクロール実行時の日付で自動解決される。
+    list_url: "https://www.radionikkei.jp/keiba_article/news/%Y/%m/"
+    max_list_articles: 80
     article_list_selector: "a[href^='/keiba_article/news/']"
     title_selector: "h2.proglam-article-title"
     content_selector: ".article-box"

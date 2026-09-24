@@ -41,7 +41,17 @@ class SourceConfig(BaseModel):
     enabled: bool = Field(default=True, description="Whether the source is active")
     base_url: str = Field(description="Base URL of the website")
     feed_url: str | None = Field(default=None, description="RSS/Atom feed URL")
-    list_url: str | None = Field(default=None, description="Article list page URL")
+    list_url: str | None = Field(
+        default=None,
+        description="Article list page URL. May contain strftime placeholders "
+        "(e.g. '%Y/%m/') resolved against today's date at crawl time, for "
+        "sources whose article index is a monthly archive page.",
+    )
+    max_list_articles: int = Field(
+        default=20,
+        description="Max number of article links to follow from the list page per crawl. "
+        "Raise for archive-style list pages that need to cover many races in one day.",
+    )
     article_list_selector: str | None = Field(
         default=None, description="CSS selector for article links in list"
     )

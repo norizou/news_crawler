@@ -18,7 +18,7 @@ class HTMLAdapter(BaseAdapter):
 
     async def fetch(self) -> list[Article]:
         """Fetch article list and extract metadata and contents."""
-        list_url = self.source.list_url or self.source.base_url
+        list_url = datetime.now().strftime(self.source.list_url or self.source.base_url)
         headers = {
             "User-Agent": self.crawler_config.user_agent,
             **self.source.headers,
@@ -60,8 +60,8 @@ class HTMLAdapter(BaseAdapter):
                     seen.add(norm)
                     unique_urls.append(u)
 
-            # Limit to recent top 20 to avoid over-fetching
-            unique_urls = unique_urls[:20]
+            # Limit to recent N to avoid over-fetching (configurable per source)
+            unique_urls = unique_urls[: self.source.max_list_articles]
 
             articles: list[Article] = []
             for url in unique_urls:
