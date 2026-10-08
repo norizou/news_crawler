@@ -280,6 +280,12 @@ def report(
     help="Include failed articles in enrichment.",
 )
 @click.option(
+    "--llm",
+    type=str,
+    default=None,
+    help="Use only this endpoint from ai.endpoints. Default: ai.endpoint_order.",
+)
+@click.option(
     "--sources-file",
     "-f",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -296,6 +302,7 @@ def enrich(
     days: int,
     limit: int,
     retry_failed: bool,
+    llm: str | None,
     sources_file: Path | None,
     config_dir: Path,
 ) -> None:
@@ -308,13 +315,18 @@ def enrich(
 
     db = Database(app_config.crawler.database_path)
     processor = AIProcessor(app_config.ai, db)
+    processor.only_endpoint = llm
 
     console.print(f"Starting AI enrichment for articles from last {days} days...")
     console.print(f"Max articles: {limit}, Retry failed: {retry_failed}")
 
-    stats = asyncio.run(
-        processor.enrich_articles(days=days, limit=limit, retry_failed=retry_failed)
-    )
+    try:
+        stats = asyncio.run(
+            processor.enrich_articles(days=days, limit=limit, retry_failed=retry_failed)
+        )
+    except (RuntimeError, ValueError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1) from e
 
     console.print("\n[bold]Enrichment Summary:[/bold]")
     console.print(f"  Total processed: {stats['total']}")

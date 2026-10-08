@@ -389,3 +389,69 @@ async def test_ai_processor_request_interval(
 
     assert len(fake_sleeper.calls) == 1  # One sleep between 2 articles
     assert fake_sleeper.calls[0] == 0.5  # Configured interval
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_endpoint_selection_and_fallback(temp_db: Database):
+    from news_crawler.config import AIEndpoint
+
+    cfg = AIConfig(
+        enabled=True,
+        endpoints=[
+            AIEndpoint(
+                name="ollama",
+                proxy_url="http://localhost:11434/v1",
+                model="llama3",
+            ),
+            AIEndpoint(
+                name="lmstudio",
+                proxy_url="http://localhost:1234/v1",
+                model="gemma",
+            ),
+        ],
+        endpoint_order=["ollama", "lmstudio"],
+    )
+
+    # 1. First endpoint /models fails, second succeeds with matching model
+    respx.get("http://localhost:11434/v1/models").mock(
+        return_value=httpx.Response(500)
+    )
+    respx.get("http://localhost:1234/v1/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "gemma"}]})
+    )
+
+    processor = AIProcessor(cfg, temp_db)
+    chosen = await processor.select_endpoint()
+    assert chosen == "lmstudio"
+    assert processor.config.proxy_url == "http://localhost:1234/v1"
+    assert processor.config.model == "gemma"
+
+    # 2. Force specific endpoint with only parameter
+    chosen_only = await processor.select_endpoint(only="lmstudio")
+    assert chosen_only == "lmstudio"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_endpoint_selection_no_usable(temp_db: Database):
+    from news_crawler.config import AIEndpoint
+
+    cfg = AIConfig(
+        enabled=True,
+        endpoints=[
+            AIEndpoint(
+                name="down_service",
+                proxy_url="http://localhost:9999/v1",
+                model="test_model",
+            ),
+        ],
+        endpoint_order=["down_service"],
+    )
+    respx.get("http://localhost:9999/v1/models").mock(
+        return_value=httpx.Response(502)
+    )
+
+    processor = AIProcessor(cfg, temp_db)
+    with pytest.raises(RuntimeError, match="No usable LLM endpoint"):
+        await processor.select_endpoint()
