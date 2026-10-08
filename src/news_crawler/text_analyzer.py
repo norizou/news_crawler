@@ -38,10 +38,17 @@ JAPANESE_STOPWORDS = {
 class TextAnalyzer:
     """Analyzer for Japanese and English text using morphological analysis and tokenization."""
 
-    def __init__(self, keywords_path: str | None = None) -> None:
+    def __init__(
+        self,
+        keywords_path: str | None = None,
+        sudachi_config_path: str | None = None,
+    ) -> None:
         try:
-            # SudachiPy initialization
-            self.dict = Dictionary()
+            # SudachiPy initialization (with optional user dictionaries)
+            if sudachi_config_path and Path(sudachi_config_path).exists():
+                self.dict = Dictionary(config_path=sudachi_config_path)
+            else:
+                self.dict = Dictionary()
             self.tokenizer = self.dict.create()
         except Exception as e:
             print(f"Error initializing SudachiPy: {e}")
@@ -99,6 +106,10 @@ class TextAnalyzer:
                         not lemma.isdigit() and
                         not re.match(r"^[0-9.]+$", lemma)
                     ):
+                        # Apply general stopwords filter if loaded (excludes overly generic terms)
+                        if self.stopwords_general and lemma.lower() in self.stopwords_general:
+                            continue
+
                         # Apply AI keywords filter if loaded
                         if self.ai_keywords:
                             if lemma in self.ai_keywords:

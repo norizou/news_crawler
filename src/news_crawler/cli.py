@@ -39,14 +39,26 @@ def main() -> None:
     help="Simulate crawl without persisting articles to database.",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
+def crawl(
+    source_key: str | None,
+    dry_run: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Execute scraping across registered AI information sources."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     coordinator = CrawlCoordinator(app_config)
 
     mode_text = "[yellow][DRY RUN][/yellow] " if dry_run else ""
@@ -113,11 +125,44 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
     help="Predefined period for report.",
 )
 @click.option(
+    "--title",
+    type=str,
+    default=None,
+    help="Custom report title (overrides config).",
+)
+@click.option(
+    "--tags",
+    "tags",
+    type=str,
+    multiple=True,
+    help="Frontmatter tags (repeatable or comma-separated, e.g. --tags ai,report).",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--category",
     "-c",
     type=str,
     default=None,
     help="Filter report by category (e.g. 'official', 'media').",
+)
+@click.option(
+    "--exclude-source",
+    "exclude_source_keys",
+    type=str,
+    multiple=True,
+    help="Source key to exclude from report (repeatable, e.g. -x deepseek_hf).",
+)
+@click.option(
+    "--exclude-duplicates/--include-duplicates",
+    default=False,
+    help="Exclude articles marked as cross-source duplicates via 'news-crawler dedupe' "
+    "(default: include).",
 )
 @click.option(
     "--output",
@@ -129,7 +174,7 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
 @click.option(
     "--visualize/--no-visualize",
     default=None,
-    help="Enable/disable word cloud and charts (default: enabled in config).",
+    help="Enable/disable word cloud (default: enabled in config).",
 )
 @click.option(
     "--top-n",
@@ -148,18 +193,33 @@ def report(
     start_date: str | None,
     end_date: str | None,
     period: str | None,
+    title: str | None,
+    tags: tuple[str, ...],
+    sources_file: Path | None,
     category: str | None,
+    exclude_source_keys: tuple[str, ...],
+    exclude_duplicates: bool,
     output: Path | None,
     visualize: bool | None,
     top_n: int | None,
     config_dir: Path,
 ) -> None:
     """Generate Markdown report from crawled articles with visualizations."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
 
     # Override config with CLI options
     report_cfg = app_config.report.model_copy()
+    if title is not None:
+        report_cfg.title = title
+    if tags:
+        parsed_tags: list[str] = []
+        for t_item in tags:
+            for t in t_item.split(","):
+                t_clean = t.strip()
+                if t_clean and t_clean not in parsed_tags:
+                    parsed_tags.append(t_clean)
+        report_cfg.tags = parsed_tags
     if visualize is not None:
         report_cfg.visualize = visualize
     if top_n is not None:
@@ -169,7 +229,12 @@ def report(
         from datetime import datetime
 
         today_str = datetime.now().strftime("%Y%m%d")
-        output = Path(app_config.crawler.output_dir) / f"weekly_report_{today_str}.md"
+        report_dir = report_cfg.output_dir or app_config.crawler.output_dir
+        output = Path(report_dir) / f"weekly_report_{today_str}.md"
+
+    # Sources disabled in config are excluded from reports by default too
+    disabled_source_keys = [key for key, src in app_config.sources.items() if not src.enabled]
+    combined_exclude_source_keys = sorted(set(exclude_source_keys) | set(disabled_source_keys))
 
     try:
         md_content = generate_markdown_report(
@@ -179,6 +244,8 @@ def report(
             end_date=end_date,
             period=period,
             category=category,
+            exclude_source_keys=combined_exclude_source_keys or None,
+            exclude_duplicates=exclude_duplicates,
             output_path=output,
             report_config=report_cfg,
         )
@@ -213,14 +280,27 @@ def report(
     help="Include failed articles in enrichment.",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def enrich(days: int, limit: int, retry_failed: bool, config_dir: Path) -> None:
+def enrich(
+    days: int,
+    limit: int,
+    retry_failed: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Enrich articles with AI-generated Japanese title and summary."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
 
     if not app_config.ai.enabled:
         console.print("[yellow]AI enrichment is disabled in configuration.[/yellow]")
@@ -260,14 +340,27 @@ def enrich(days: int, limit: int, retry_failed: bool, config_dir: Path) -> None:
     help="Max search results (default: 10).",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def search(query: str, category: str | None, limit: int, config_dir: Path) -> None:
+def search(
+    query: str,
+    category: str | None,
+    limit: int,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Search articles using SQLite FTS5 full-text index."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
 
     results = db.search_articles(query, category=category, limit=limit)
@@ -336,6 +429,13 @@ def search(query: str, category: str | None, limit: int, config_dir: Path) -> No
     help="Preview detected duplicates without writing to the database (default: dry-run).",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
@@ -348,6 +448,7 @@ def dedupe(
     period: str | None,
     min_title_len: int,
     dry_run: bool,
+    sources_file: Path | None,
     config_dir: Path,
 ) -> None:
     """Detect and mark cross-source duplicate articles (same story, different outlet).
@@ -356,7 +457,7 @@ def dedupe(
     sources within the scanned window; the earliest-published article in each
     cluster is kept as canonical. Idempotent and safe to re-run.
     """
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
 
     try:
@@ -405,14 +506,21 @@ def dedupe(
 
 @main.command("list-sources")
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def list_sources(config_dir: Path) -> None:
+def list_sources(sources_file: Path | None, config_dir: Path) -> None:
     """List all registered sources from configuration."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
 
     table = Table(title="Registered AI Sources")
     table.add_column("Key", style="cyan")
@@ -432,14 +540,21 @@ def list_sources(config_dir: Path) -> None:
 
 @main.command()
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def stats(config_dir: Path) -> None:
+def stats(sources_file: Path | None, config_dir: Path) -> None:
     """Show database statistics."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
     info = db.get_stats()
 
