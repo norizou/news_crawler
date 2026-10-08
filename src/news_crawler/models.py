@@ -85,6 +85,12 @@ class Article(BaseModel):
     ai_prompt_version: str = Field(default="1", description="Prompt version used")
     ai_processed_at: datetime | None = Field(default=None, description="AI processing timestamp")
     ai_error: str | None = Field(default=None, description="AI processing error message")
+    duplicate_of_id: int | None = Field(
+        default=None, description="ID of the canonical article this duplicates, if any"
+    )
+    duplicate_score: float | None = Field(
+        default=None, description="Similarity score used to mark this as a duplicate"
+    )
 
 
 class CrawlResult(BaseModel):

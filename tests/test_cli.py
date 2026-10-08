@@ -137,3 +137,11 @@ def test_cli_stats_with_ai_status(cli_config_dir: Path):
     assert res_stats.exit_code == 0
     # AI status may or may not be shown depending on whether the section exists
     # Just verify stats command works
+
+
+def test_cli_dedupe(cli_config_dir: Path):
+    """Test dedupe command dry-run and apply."""
+    runner = CliRunner()
+    res = runner.invoke(main, ["dedupe", "--days", "7", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+    assert "No cross-source duplicates found" in res.output
