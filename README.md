@@ -147,11 +147,14 @@ uv run news-crawler crawl --source qwen_hf
 
 ### AI翻訳・要約（オプション）
 
-AIA Proxyを利用して、収集した英文記事を日本語に翻訳・要約できます。
+AIA ProxyやローカルLLM（Ollama, LM Studio等）を利用して、収集した英文記事を日本語に翻訳・要約できます。
 
 ```bash
-# AI翻訳・要約を有効化（config/crawler.yamlでai.enabled: true）
+# AI翻訳・要約を実行（config/crawler.yamlでai.enabled: true）
 uv run news-crawler enrich --days 7 --limit 50
+
+# 特定のエンドポイントを指定して実行
+uv run news-crawler enrich --days 7 --llm local_ollama
 
 # 失敗した記事を再試行
 uv run news-crawler enrich --days 7 --retry-failed
@@ -161,18 +164,52 @@ AI処理には以下の特徴があります。
 
 - **原文保存後の処理**: まず原文を確実にDBに保存し、その後にAI処理を行うため、AI障害でも原文は保持されます。
 - **差分処理**: 新規記事・内容変更記事のみを処理し、不変記事は再処理しません。
+- **エンドポイントフォールバック**: `config/crawler.yaml` の `ai.endpoint_order` に設定されたエンドポイントを順に検査し、稼働中のLLMを自動選択します。
+- **重複記事のスキップ**: `dedupe` で重複判定された記事は自動的にAI処理の対象外となり、トークン消費を抑制します。
 - **システムプロンプトのカスタマイズ**: `config/crawler.yaml` の `ai.system_prompt` で出力形式や要約方針を調整できます。
 - **再処理の明示制御**: プロンプトを変更して処理済み記事を再適用したい場合は、`config/crawler.yaml` の `ai.prompt_version` を更新（例: `"1"` → `"2"`）します。
 - **オフライン検索**: 日本語タイトル・要約はDBに保存されるため、オフラインで日本語検索が可能です。
 - **レート制限対応**: リクエスト間隔を設定し、APIレート制限を回避します。
 
+### クロスソース重複記事の検出（Dedupe）
+
+異なるメディアが同一のプレスリリースや発表を独自に記事化した場合、正規化タイトルの一致によって重複を検出・集約します。
+
+```bash
+# 直近7日間の重複候補をプレビュー（ドライラン）
+uv run news-crawler dedupe --days 7
+
+# 重複判定をDBに保存
+uv run news-crawler dedupe --days 7 --apply
+```
+
+最も早く配信された記事を代表（Canonical）とし、重複記事には代表記事IDが記録されます。
+
+### 日付別ダイジェスト生成
+
+収集した記事を日付ごとに `<出力先>/<年>/<YYYY-MM-DD>.md` として日次まとめファイルを出力します。
+
+```bash
+# 直近7日分の日付別ダイジェストを生成
+uv run news-crawler digest --days 7
+
+# AI要約済みの記事のみ出力
+uv run news-crawler digest --days 7 --only-summarized
+
+# 出力先ディレクトリを指定
+uv run news-crawler digest --days 7 -o output/digest
+```
+
 ### レポートの生成
 
-収集した記事からMarkdownレポートを生成します。既定でワードクラウドと単語頻度分布（パイチャート）の可視化が有効です。
+収集した記事からMarkdownレポートを生成します。既定でワードクラウドの可視化が有効です。
 
 ```bash
 # 直近7日間の週次レポートを生成（可視化あり）
 uv run news-crawler report
+
+# 重複記事を除外してレポート生成
+uv run news-crawler report --exclude-duplicates
 
 # 期間指定（例: 直近30日間、Top 15単語）
 uv run news-crawler report --days 30 --top-n 15
@@ -189,10 +226,11 @@ uv run news-crawler report --no-visualize
 
 レポートの可視化には以下の特徴があります。
 
-- **言語別分析**: 日本語（SudachiPyによる形態素解析）と原文（英数字トークナイズ）を個別に分析します。
+- **言語別分析**: 原文を優先的に形態素解析し、必要に応じて英数字トークナイズを行います。
+- **無効ソースの自動除外**: `sources.yaml` で `enabled: false` に設定されたソースは自動的にレポート集計から除外されます。
 - **アセット出力**: 画像はレポートファイル名に基づいたアセットディレクトリ（例: `report_assets/`）に出力され、Markdownから相対パスで参照されます。
 - **Frontmatterの拡充**: 分析条件（期間、Top N、可視化有無等）がレポートのFrontmatterにYAML形式で記録されます。
-- **日本語フォント**: 既定でシステム内の一般的な日本語フォントを自動検出します。明示的に指定する場合は `config/crawler.yaml` の `report.japanese_font_path` を設定してください。
+- **日本語フォント**: システム内の日本語フォントを自動検出します。明示的に指定する場合は `config/crawler.yaml` の `report.japanese_font_path` を設定してください。
 
 ### 記事の検索 (FTS5 全文検索)
 

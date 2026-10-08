@@ -23,9 +23,11 @@ ENGLISH_STOPWORDS = {
 
 # Basic Japanese stopwords (representative)
 JAPANESE_STOPWORDS = {
-    "これ", "それ", "あれ", "これら", "それら", "あれら", "私", "私たち", "僕", "僕ら", "君", "君たち",
-    "彼", "彼女", "彼ら", "ここ", "そこ", "あそこ", "どこ", "こちら", "そちら", "あちら", "どちら",
-    "もの", "こと", "とき", "よう", "ほう", "わけ", "ため", "はず", "まま", "うち", "ところ", "つもり",
+    "これ", "それ", "あれ", "これら", "それら", "あれら", "私", "私たち",
+    "僕", "僕ら", "君", "君たち", "彼", "彼女", "彼ら", "ここ", "そこ",
+    "あそこ", "どこ", "こちら", "そちら", "あちら", "どちら",
+    "もの", "こと", "とき", "よう", "ほう", "わけ", "ため", "はず",
+    "まま", "うち", "ところ", "つもり",
     "いつ", "どこ", "だれ", "なに", "なぜ", "どう", "どこ", "どれ", "どの", "どのよう",
     "する", "なる", "ある", "いる", "くる", "いく", "いう", "できる", "くる", "おもう",
     "また", "しかし", "そして", "さらに", "または", "それとも", "および", "ならびに", "あるいは",
@@ -129,7 +131,11 @@ class TextAnalyzer:
             # Extract words (alphanumeric)
             words = re.findall(r"\b[a-zA-Z0-9-]{2,}\b", text.lower())
             for word in words:
-                if word not in ENGLISH_STOPWORDS and not word.isdigit() and not re.match(r"^[0-9.-]+$", word):
+                if (
+                    word not in ENGLISH_STOPWORDS
+                    and not word.isdigit()
+                    and not re.match(r"^[0-9.-]+$", word)
+                ):
                     # Apply general stopwords filter if loaded
                     if self.stopwords_general and word in self.stopwords_general:
                         continue

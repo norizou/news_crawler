@@ -60,7 +60,9 @@ def test_resolve_report_period():
     assert end == now
 
     # Date range
-    start, end, mode = resolve_report_period(start_date="2026-09-01", end_date="2026-09-05", base_now=now)
+    start, end, mode = resolve_report_period(
+        start_date="2026-09-01", end_date="2026-09-05", base_now=now
+    )
     assert mode == "date_range"
     assert start == datetime(2026, 9, 1)
     assert end == datetime(2026, 9, 6) # Exclusive end

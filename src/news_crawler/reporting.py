@@ -29,7 +29,9 @@ def resolve_report_period(
     # Check for conflicts
     specified = [x for x in [days is not None, start_date is not None, period is not None] if x]
     if len(specified) > 1:
-        raise ValueError("Only one of 'days', 'date range' (start/end), or 'period' can be specified.")
+        raise ValueError(
+            "Only one of 'days', 'date range' (start/end), or 'period' can be specified."
+        )
 
     if start_date or end_date:
         if not start_date:

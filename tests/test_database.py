@@ -298,11 +298,15 @@ def test_get_articles_in_range(temp_db: Database, sample_source: SourceConfig):
     assert results[0].title == "In Range"
 
     # Range including old
-    results = temp_db.get_articles_in_range(base_time - timedelta(days=10), base_time + timedelta(days=1))
+    results = temp_db.get_articles_in_range(
+        base_time - timedelta(days=10), base_time + timedelta(days=1)
+    )
     assert len(results) == 2
 
     # Category filter
-    results = temp_db.get_articles_in_range(base_time - timedelta(days=10), base_time + timedelta(days=10), category="media")
+    results = temp_db.get_articles_in_range(
+        base_time - timedelta(days=10), base_time + timedelta(days=10), category="media"
+    )
     assert len(results) == 0
 
 

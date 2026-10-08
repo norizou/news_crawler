@@ -138,7 +138,9 @@ class VisualizationGenerator:
 
             # Matplotlib pie labels can be tricky with Japanese, let's also set legend
             if prop:
-                plt.legend(patches, labels, prop=prop, loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+                plt.legend(
+                    patches, labels, prop=prop, loc="center left", bbox_to_anchor=(1, 0, 0.5, 1)
+                )
 
             plt.title(title, fontproperties=prop)
             plt.axis('equal')

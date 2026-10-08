@@ -39,14 +39,23 @@ uv run news-crawler crawl --source openai
 # dry-run
 uv run news-crawler crawl --dry-run
 
+# 重複検出・排除 (クロスソース)
+uv run news-crawler dedupe --days 7 --apply
+
 # AI翻訳・要約 (config/crawler.yamlでai.enabled: true)
 uv run news-crawler enrich --days 7 --limit 50
+
+# 特定LLMエンドポイントを指定して要約
+uv run news-crawler enrich --days 7 --llm local_ollama
 
 # 失敗した記事を再試行
 uv run news-crawler enrich --days 7 --retry-failed
 
-# レポート生成
-uv run news-crawler report
+# 日付別ダイジェスト生成
+uv run news-crawler digest --days 7
+
+# レポート生成 (重複除外)
+uv run news-crawler report --exclude-duplicates
 
 # 検索 (FTS5、英文・日本語対応)
 uv run news-crawler search "キーワード"
