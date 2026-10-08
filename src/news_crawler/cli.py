@@ -15,6 +15,7 @@ from news_crawler.database import Database
 from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
 from news_crawler.digest import write_digests
 from news_crawler.reporting import generate_markdown_report, resolve_report_period
+from news_crawler.text_analyzer import TextAnalyzer
 
 console = Console()
 
@@ -675,6 +676,222 @@ def digest(
             "(re-dated article; writing it would overwrite that day's digest)[/yellow]"
         )
     console.print(f"[green]Wrote {len(written)} daily digest(s) under {root}[/green]")
+
+
+@main.command("extract-keywords")
+@click.option(
+    "--days",
+    "-d",
+    type=int,
+    default=7,
+    help="Number of days to scan for keywords (default: 7).",
+)
+@click.option(
+    "--start-date",
+    type=str,
+    default=None,
+    help="Start date for the scan (YYYY-MM-DD).",
+)
+@click.option(
+    "--end-date",
+    type=str,
+    default=None,
+    help="End date for the scan (YYYY-MM-DD).",
+)
+@click.option(
+    "--period",
+    "-p",
+    type=click.Choice(["week", "month", "quarter"]),
+    default=None,
+    help="Predefined period for the scan.",
+)
+@click.option(
+    "--min-count",
+    type=int,
+    default=2,
+    help="Minimum occurrence count to include (default: 2).",
+)
+@click.option(
+    "--top-n",
+    type=int,
+    default=50,
+    help="Number of top keywords to display (default: 50).",
+)
+@click.option(
+    "--keywords-path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to ai_keywords.yaml for comparison (default: config/ai_keywords.yaml).",
+)
+@click.option(
+    "--append",
+    is_flag=True,
+    default=False,
+    help="Append new keywords to ai_keywords.yaml.",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def extract_keywords(
+    days: int,
+    start_date: str | None,
+    end_date: str | None,
+    period: str | None,
+    min_count: int,
+    top_n: int,
+    keywords_path: Path | None,
+    append: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
+    """Extract trending keywords from articles and optionally update ai_keywords.yaml."""
+    app_config = load_config(config_dir, sources_file=sources_file)
+    db = Database(app_config.crawler.database_path)
+
+    try:
+        start_at, end_at, _mode = resolve_report_period(days, start_date, end_date, period)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        ctx = click.get_current_context()
+        click.echo(ctx.get_help())
+        ctx.exit(1)
+        return
+
+    disabled = [k for k, src in app_config.sources.items() if not src.enabled]
+    articles = db.get_articles_in_range(
+        start_at,
+        end_at,
+        exclude_source_keys=disabled or None,
+        exclude_duplicates=True,
+    )
+
+    if not articles:
+        console.print("[yellow]No articles found in the specified period.[/yellow]")
+        return
+
+    keywords_file = keywords_path or Path(config_dir) / "ai_keywords.yaml"
+    analyzer = TextAnalyzer(keywords_path=str(keywords_file))
+
+    # Extract trending keywords
+    trending = analyzer.extract_trending_keywords(articles, min_count=min_count, top_n=top_n)
+
+    if not trending:
+        console.print("[yellow]No keywords found matching the criteria.[/yellow]")
+        return
+
+    # Load existing keywords for comparison
+    existing_keywords = set()
+    if keywords_file.exists():
+        try:
+            import yaml
+            with open(keywords_file, encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+                existing_keywords = set(k.lower() for k in data.get("ai_keywords", []))
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not load existing keywords: {e}[/yellow]")
+
+    # Separate new vs existing keywords (case-insensitive comparison)
+    new_keywords = [(k, v) for k, v in trending if k.lower() not in existing_keywords]
+    existing_found = [(k, v) for k, v in trending if k.lower() in existing_keywords]
+
+    console.print(f"\n[bold]Trending Keywords ({start_at.date()} to {end_at.date()})[/bold]")
+    console.print(f"Total articles analyzed: {len(articles)}")
+    console.print(f"Keywords found: {len(trending)} (min count: {min_count})\n")
+
+    if new_keywords:
+        console.print(
+            f"[bold cyan]New Keywords (not in ai_keywords.yaml): {len(new_keywords)}[/bold cyan]"
+        )
+        table = Table()
+        table.add_column("Keyword", style="cyan")
+        table.add_column("Count", justify="right")
+        for keyword, count in new_keywords:
+            table.add_row(keyword, str(count))
+        console.print(table)
+    else:
+        console.print("[green]All trending keywords are already in ai_keywords.yaml![/green]")
+
+    if existing_found:
+        console.print(
+            f"\n[bold]Existing Keywords (already in ai_keywords.yaml): {len(existing_found)}[/bold]"
+        )
+        table = Table()
+        table.add_column("Keyword", style="green")
+        table.add_column("Count", justify="right")
+        for keyword, count in existing_found[:20]:  # Show top 20 existing
+            table.add_row(keyword, str(count))
+        console.print(table)
+
+    if append and new_keywords:
+        if not keywords_file.exists():
+            console.print(f"[red]Error: Keywords file not found: {keywords_file}[/red]")
+            return
+
+        try:
+            import json
+            import re
+
+            import yaml
+
+            # Read and parse the file, then insert only new list items so comments remain intact.
+            with open(keywords_file, encoding="utf-8") as f:
+                content = f.read()
+            data = yaml.safe_load(content) or {}
+            current_keywords = data.get("ai_keywords", [])
+            current_lower = {
+                keyword.lower()
+                for keyword in current_keywords
+                if isinstance(keyword, str)
+            }
+
+            keywords_to_add = []
+            for keyword, _ in new_keywords:
+                normalized = keyword.lower()
+                if normalized not in current_lower:
+                    keywords_to_add.append(normalized)
+                    current_lower.add(normalized)
+
+            if keywords_to_add:
+                lines = "\n".join(
+                    f"  - {json.dumps(keyword, ensure_ascii=False)}" for keyword in keywords_to_add
+                )
+                section_match = re.search(r"(?m)^ai_keywords:\s*$", content)
+                if section_match:
+                    next_section = re.search(
+                        r"(?m)^[A-Za-z_][A-Za-z0-9_-]*:\s*$",
+                        content[section_match.end():],
+                    )
+                    insert_at = (
+                        section_match.end() + next_section.start()
+                        if next_section
+                        else len(content)
+                    )
+                    prefix = content[:insert_at].rstrip("\n")
+                    suffix = content[insert_at:].lstrip("\n")
+                    content = f"{prefix}\n\n  # Automatically extracted keywords\n{lines}\n"
+                    if suffix:
+                        content += f"\n{suffix}"
+                else:
+                    content = content.rstrip() + f"\n\nai_keywords:\n{lines}\n"
+
+            with open(keywords_file, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            console.print(
+                f"\n[green]Added {len(keywords_to_add)} new keywords to {keywords_file}[/green]"
+            )
+        except Exception as e:
+            console.print(f"[red]Error updating keywords file: {e}[/red]")
 
 
 if __name__ == "__main__":

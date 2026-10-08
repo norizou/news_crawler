@@ -169,7 +169,20 @@ AI処理には以下の特徴があります。
 - **システムプロンプトのカスタマイズ**: `config/crawler.yaml` の `ai.system_prompt` で出力形式や要約方針を調整できます。
 - **再処理の明示制御**: プロンプトを変更して処理済み記事を再適用したい場合は、`config/crawler.yaml` の `ai.prompt_version` を更新（例: `"1"` → `"2"`）します。
 - **オフライン検索**: 日本語タイトル・要約はDBに保存されるため、オフラインで日本語検索が可能です。
+- **キーワード抽出**: AI処理時に記事ごとのAI・技術キーワードを抽出し、既存のRSSタグとマージして `articles.tags` に保存します。
 - **レート制限対応**: リクエスト間隔を設定し、APIレート制限を回避します。
+
+LLM抽出キーワードは、`ai_keywords.yaml` に未登録の新語を発見するための候補として利用できます。`extract-keywords` は保存済みタグと記事テキストを横断集計し、既存辞書との比較結果を表示します。抽出用ストップワードは `config/ai_keywords.yaml` の `stopwords_extraction` で設定できます。
+
+```bash
+# 直近30日間の新語候補を確認
+uv run news-crawler extract-keywords --days 30 --min-count 3 --top-n 30
+
+# 新語候補を ai_keywords.yaml に追記（実行前に内容を確認）
+uv run news-crawler extract-keywords --days 30 --min-count 3 --append
+```
+
+`--append` は YAML の `ai_keywords` リストに項目を追加し、既存のコメントと他の設定セクションを保持します。大文字・小文字は区別せず重複を排除します。自動抽出語は候補であり、辞書へ追加する前に内容を確認してください。
 
 ### クロスソース重複記事の検出（Dedupe）
 

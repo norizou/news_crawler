@@ -58,7 +58,10 @@ async def test_ai_processor_parse_response(ai_config: AIConfig):
         "choices": [
             {
                 "message": {
-                    "content": '{"title_ja": "テストタイトル", "summary_ja": "テスト要約"}'
+                    "content": (
+                        '{"title_ja": "テストタイトル", "summary_ja": "テスト要約", '
+                        '"keywords": ["ai", "test"]}'
+                    )
                 }
             }
         ]
@@ -69,6 +72,7 @@ async def test_ai_processor_parse_response(ai_config: AIConfig):
 
     assert result.title_ja == "テストタイトル"
     assert result.summary_ja == "テスト要約"
+    assert result.keywords == ["ai", "test"]
 
 
 @pytest.mark.asyncio
@@ -81,7 +85,8 @@ async def test_ai_processor_parse_response_with_markdown(ai_config: AIConfig):
                 "message": {
                     "content": (
                         "```json\n"
-                        '{"title_ja": "テストタイトル", "summary_ja": "テスト要約"}\n'
+                        '{"title_ja": "テストタイトル", "summary_ja": "テスト要約", '
+                        '"keywords": ["ai", "test"]}\n'
                         "```"
                     )
                 }
@@ -94,6 +99,7 @@ async def test_ai_processor_parse_response_with_markdown(ai_config: AIConfig):
 
     assert result.title_ja == "テストタイトル"
     assert result.summary_ja == "テスト要約"
+    assert result.keywords == ["ai", "test"]
 
 
 @pytest.mark.asyncio
@@ -120,6 +126,30 @@ async def test_ai_processor_parse_response_missing_fields(ai_config: AIConfig):
 
     with pytest.raises(ValueError, match="Invalid AI response format"):
         processor._parse_ai_response(response)
+
+
+@pytest.mark.asyncio
+async def test_ai_processor_parse_response_with_keywords(ai_config: AIConfig):
+    """Test parsing AI response with keywords field."""
+    response = {
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        '{"title_ja": "テストタイトル", "summary_ja": "テスト要約", '
+                        '"keywords": ["deepseek", "transformer", "ai"]}'
+                    )
+                }
+            }
+        ]
+    }
+
+    processor = AIProcessor(ai_config, Database(":memory:"))
+    result = processor._parse_ai_response(response)
+
+    assert result.title_ja == "テストタイトル"
+    assert result.summary_ja == "テスト要約"
+    assert result.keywords == ["deepseek", "transformer", "ai"]
 
 
 @pytest.mark.asyncio
@@ -238,6 +268,7 @@ async def test_ai_processor_enrich_single_article(
     assert updated.ai_status == "completed"
     assert updated.title_ja == "新しいAIモデルのブレイクスルー"
     assert updated.summary_ja == "新しいAIモデルに関する重要な発見の要約。"
+    assert updated.tags == ["deepseek", "transformer", "ai"]
     assert updated.ai_model == ai_config.model
     assert updated.ai_prompt_version == ai_config.prompt_version
 

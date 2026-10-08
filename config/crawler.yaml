@@ -27,19 +27,15 @@ ai:
   enabled: true
   # 使うLLMは endpoint_order の先頭から順に試し、最初に到達できて対象モデルがロード済みのものを使う。
   # 特定の1つだけ使うとき: uv run news-crawler enrich --llm local_ollama
-  endpoint_order: [local_ollama, local_lmstudio]
+  endpoint_order: [local_ollama]
   endpoints:
     - name: local_ollama
       proxy_url: "http://localhost:11434/v1"
-      model: "llama-3-3-70b-instruct"
+      model: "GPT-OSS-20B"
       max_tokens: 1000
-    - name: local_lmstudio
-      proxy_url: "http://localhost:1234/v1"
-      model: "google/gemma-4-e4b"
-      max_tokens: 3000
   # 下2行は endpoints 未使用時の単一エンドポイント設定（後方互換）
   proxy_url: "http://localhost:11434/v1"
-  model: "llama-3-3-70b-instruct"
+  model: "GPT-OSS-20B"
   request_interval: 2.0
   timeout_seconds: 60
   max_retries: 3
@@ -52,12 +48,14 @@ ai:
 
     {
       "title_ja": "Japanese translation of the article title",
-      "summary_ja": "Japanese summary of the article content (2-3 sentences)"
+      "summary_ja": "Japanese summary of the article content (2-3 sentences)",
+      "keywords": ["keyword1", "keyword2", "keyword3"]
     }
 
     Important guidelines:
     - Translate the title accurately to Japanese
     - Create a concise summary in Japanese (2-3 sentences)
     - If the article is already in Japanese, still provide a refined Japanese summary
+    - Extract 3-5 key AI/technology keywords from the article (e.g., model names, techniques, companies, frameworks). Include both English and Japanese terms if relevant.
     - Output ONLY the JSON object, no additional text
     - Ensure the JSON is valid and properly formatted

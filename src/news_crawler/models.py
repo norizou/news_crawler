@@ -25,10 +25,11 @@ class AIStatus(StrEnum):
 
 
 class AIResponse(BaseModel):
-    """AI-generated response containing Japanese title and summary."""
+    """AI-generated response containing Japanese title, summary, and keywords."""
 
     title_ja: str = Field(description="Japanese title")
     summary_ja: str = Field(description="Japanese summary")
+    keywords: list[str] = Field(default_factory=list, description="Extracted AI/tech keywords")
 
 
 class SourceConfig(BaseModel):

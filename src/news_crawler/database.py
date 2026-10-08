@@ -632,10 +632,35 @@ class Database:
         model: str,
         prompt_version: str,
         input_hash: str,
+        keywords: list[str] | None = None,
     ) -> None:
         """Save AI enrichment result for an article."""
         processed_iso = datetime.now().isoformat()
+
         with self.connection() as conn:
+            row = conn.execute("SELECT tags FROM articles WHERE id = ?", (article_id,)).fetchone()
+            existing_tags = []
+            if row and row[0]:
+                try:
+                    loaded_tags = json.loads(row[0])
+                    if isinstance(loaded_tags, list):
+                        existing_tags = [tag for tag in loaded_tags if isinstance(tag, str)]
+                except (TypeError, json.JSONDecodeError):
+                    pass
+
+            # Merge and deduplicate (case-insensitive), preserving existing tag spelling/order.
+            merged_tags = list(existing_tags)
+            existing_lower = {tag.lower() for tag in merged_tags}
+            for keyword in keywords or []:
+                if (
+                    isinstance(keyword, str)
+                    and keyword.strip()
+                    and keyword.lower() not in existing_lower
+                ):
+                    merged_tags.append(keyword)
+                    existing_lower.add(keyword.lower())
+
+            tags_json = json.dumps(merged_tags, ensure_ascii=False) if merged_tags else None
             conn.execute(
                 """
                 UPDATE articles SET
@@ -646,7 +671,8 @@ class Database:
                     ai_model = ?,
                     ai_prompt_version = ?,
                     ai_processed_at = ?,
-                    ai_error = NULL
+                    ai_error = NULL,
+                    tags = ?
                 WHERE id = ?
                 """,
                 (
@@ -656,6 +682,7 @@ class Database:
                     model,
                     prompt_version,
                     processed_iso,
+                    tags_json,
                     article_id,
                 ),
             )

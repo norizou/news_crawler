@@ -3,9 +3,13 @@
 import re
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 from sudachipy import Dictionary, SplitMode
+
+if TYPE_CHECKING:
+    from news_crawler.models import Article
 
 # Basic English stopwords
 ENGLISH_STOPWORDS = {
@@ -18,7 +22,10 @@ ENGLISH_STOPWORDS = {
     "each", "further", "here", "how", "just", "now", "once", "only", "other", "our", "out",
     "over", "own", "same", "she", "should", "so", "some", "than", "too", "under", "until", "up",
     "very", "were", "what", "when", "where", "while", "who", "whom", "why", "with", "you", "your",
-    "yours", "yourself", "yourselves"
+    "yours", "yourself", "yourselves",
+    # Additional common stopwords for keyword extraction
+    "one", "more", "data", "print", "first", "be", "agents", "gpt", "but", "an", "as", "at", "from",
+    "are", "not",
 }
 
 # Basic Japanese stopwords (representative)
@@ -59,6 +66,7 @@ class TextAnalyzer:
         # Load AI keywords filter
         self.ai_keywords: set[str] = set()
         self.stopwords_general: set[str] = set()
+        self.stopwords_extraction: set[str] = set()
 
         if keywords_path and Path(keywords_path).exists():
             self._load_keywords(keywords_path)
@@ -71,15 +79,28 @@ class TextAnalyzer:
 
                 # Load AI keywords (whitelist)
                 if "ai_keywords" in data:
-                    self.ai_keywords = set(k.lower() for k in data["ai_keywords"])
+                    self.ai_keywords = set(
+                        k.lower() if isinstance(k, str) else str(k)
+                        for k in data["ai_keywords"]
+                    )
 
                 # Load general stopwords (blacklist)
                 if "stopwords_general" in data:
-                    self.stopwords_general = set(k.lower() for k in data["stopwords_general"])
+                    self.stopwords_general = set(
+                        k.lower() if isinstance(k, str) else str(k)
+                        for k in data["stopwords_general"]
+                    )
+
+                # Load extraction stopwords (for keyword extraction)
+                if "stopwords_extraction" in data:
+                    self.stopwords_extraction = set(
+                        k.lower() if isinstance(k, str) else str(k)
+                        for k in data["stopwords_extraction"]
+                    )
         except Exception as e:
             print(f"Error loading keywords from {keywords_path}: {e}")
 
-    def analyze_japanese(self, texts: list[str]) -> Counter[str]:
+    def analyze_japanese(self, texts: list[str], use_ai_filter: bool = True) -> Counter[str]:
         """Analyze Japanese texts and return word frequencies of nouns, verbs, and adjectives."""
         if not self.tokenizer:
             return Counter()
@@ -112,16 +133,17 @@ class TextAnalyzer:
                         if self.stopwords_general and lemma.lower() in self.stopwords_general:
                             continue
 
-                        # Apply AI keywords filter if loaded
-                        if self.ai_keywords:
+                        # Apply AI keywords filter if loaded and use_ai_filter is True
+                        if use_ai_filter and self.ai_keywords:
                             if lemma in self.ai_keywords:
                                 counter[lemma] += 1
                         else:
+                            # When use_ai_filter is False, count all words (after stopwords filter)
                             counter[lemma] += 1
 
         return counter
 
-    def analyze_english(self, texts: list[str]) -> Counter[str]:
+    def analyze_english(self, texts: list[str], use_ai_filter: bool = True) -> Counter[str]:
         """Analyze English texts and return word frequencies of alphanumeric words."""
         counter: Counter[str] = Counter()
         for text in texts:
@@ -131,20 +153,86 @@ class TextAnalyzer:
             # Extract words (alphanumeric)
             words = re.findall(r"\b[a-zA-Z0-9-]{2,}\b", text.lower())
             for word in words:
+                word_lower = word.lower()
                 if (
-                    word not in ENGLISH_STOPWORDS
-                    and not word.isdigit()
-                    and not re.match(r"^[0-9.-]+$", word)
+                    word_lower not in ENGLISH_STOPWORDS
+                    and not word_lower.isdigit()
+                    and not re.match(r"^[0-9.-]+$", word_lower)
                 ):
                     # Apply general stopwords filter if loaded
-                    if self.stopwords_general and word in self.stopwords_general:
+                    if self.stopwords_general and word_lower in self.stopwords_general:
                         continue
 
-                    # Apply AI keywords filter if loaded
-                    if self.ai_keywords:
-                        if word in self.ai_keywords:
-                            counter[word] += 1
+                    # Apply AI keywords filter if loaded and use_ai_filter is True
+                    if use_ai_filter and self.ai_keywords:
+                        if word_lower in self.ai_keywords:
+                            counter[word_lower] += 1
                     else:
-                        counter[word] += 1
+                        counter[word_lower] += 1
 
         return counter
+
+    def extract_from_tags(self, tags_list: list[list[str]]) -> Counter[str]:
+        """Extract and count keywords from article tags."""
+        counter: Counter[str] = Counter()
+        for tags in tags_list:
+            if not tags:
+                continue
+            for tag in tags:
+                tag_lower = tag.lower().strip()
+                if len(tag_lower) > 1 and not tag_lower.isdigit():
+                    # Apply general stopwords filter if loaded
+                    if self.stopwords_general and tag_lower in self.stopwords_general:
+                        continue
+                    # Also check built-in stopwords
+                    if tag_lower in ENGLISH_STOPWORDS or tag_lower in JAPANESE_STOPWORDS:
+                        continue
+                    counter[tag_lower] += 1
+        return counter
+
+    def extract_trending_keywords(
+        self,
+        articles: list["Article"],
+        min_count: int = 2,
+        top_n: int = 50,
+    ) -> list[tuple[str, int]]:
+        """
+        Extract trending keywords from articles using tags and text analysis.
+
+        Returns list of (keyword, count) tuples sorted by frequency.
+        """
+        # Extract from tags
+        tags_list = [a.tags for a in articles if a.tags]
+        counter = self.extract_from_tags(tags_list)
+
+        # Also analyze text for additional keywords (disable AI filter to discover new words)
+        ja_texts = [
+            f"{a.title_ja} {a.summary_ja}"
+            for a in articles
+            if a.ai_status == "completed" and (a.title_ja or a.summary_ja)
+        ]
+        if ja_texts:
+            ja_freq = self.analyze_japanese(ja_texts, use_ai_filter=False)
+            # Filter out extraction stopwords from config (case-insensitive)
+            if self.stopwords_extraction:
+                ja_freq = Counter(
+                    {k: v for k, v in ja_freq.items() if k.lower() not in self.stopwords_extraction}
+                )
+            counter.update(ja_freq)
+
+        orig_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
+        en_freq = self.analyze_japanese(orig_texts, use_ai_filter=False) or self.analyze_english(
+            orig_texts, use_ai_filter=False
+        )
+        # Filter out extraction stopwords from config (case-insensitive)
+        if self.stopwords_extraction:
+            en_freq = Counter(
+                {k: v for k, v in en_freq.items() if k.lower() not in self.stopwords_extraction}
+            )
+        counter.update(en_freq)
+
+        # Filter by minimum count and sort
+        filtered = [(k, v) for k, v in counter.items() if v >= min_count]
+        sorted_keywords = sorted(filtered, key=lambda x: (-x[1], x[0]))
+
+        return sorted_keywords[:top_n]

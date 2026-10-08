@@ -167,7 +167,20 @@ AI processing features:
 - **Customizable System Prompt**: Adjust output requirements and summary styles via `ai.system_prompt` in `config/crawler.yaml`.
 - **Explicit Reprocessing Control**: To re-enrich already processed articles after prompt updates, bump `ai.prompt_version` in `config/crawler.yaml` (e.g., `"1"` → `"2"`).
 - **Offline Search**: Japanese titles and summaries are saved to DB, enabling offline Japanese search.
+- **Keyword Extraction**: AI/technology keywords are extracted per article during enrichment and merged with existing RSS tags in `articles.tags`.
 - **Rate Limit Handling**: Configurable request intervals to avoid API rate limits.
+
+Use the extracted LLM keywords to discover candidates missing from `ai_keywords.yaml`. `extract-keywords` aggregates stored tags and article text, then compares the result with the configured dictionary. Additional extraction stopwords can be configured under `stopwords_extraction` in `config/ai_keywords.yaml`.
+
+```bash
+# Review new keyword candidates from the last 30 days
+uv run news-crawler extract-keywords --days 30 --min-count 3 --top-n 30
+
+# Append candidates to ai_keywords.yaml (review the output first)
+uv run news-crawler extract-keywords --days 30 --min-count 3 --append
+```
+
+`--append` adds items to the `ai_keywords` list while preserving existing comments and other YAML sections. Comparison and deduplication are case-insensitive. Treat automatically extracted terms as candidates and review them before adding them to the dictionary.
 
 ### Report Generation
 

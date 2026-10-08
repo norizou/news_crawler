@@ -1,5 +1,6 @@
 """Tests for CLI commands."""
 
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -8,6 +9,8 @@ import respx
 from click.testing import CliRunner
 
 from news_crawler.cli import main
+from news_crawler.database import Database
+from news_crawler.models import Article, FetchMethod, SourceConfig
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -137,6 +140,70 @@ def test_cli_enrich_disabled(cli_config_dir: Path):
     res = runner.invoke(main, ["enrich", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 0
     assert "AI enrichment is disabled" in res.output
+
+
+def test_cli_extract_keywords_append_preserves_comments(cli_config_dir: Path, tmp_path: Path):
+    """Test keyword extraction and comment-preserving dictionary updates."""
+    keywords_file = tmp_path / "ai_keywords.yaml"
+    keywords_file.write_text(
+        """# Dictionary header
+ai_keywords:
+  # Existing category
+  - openai
+
+stopwords_general:
+  - new
+""",
+        encoding="utf-8",
+    )
+
+    db = Database(tmp_path / "cli_test.db")
+    db.upsert_source(
+        SourceConfig(
+            key="sample_rss",
+            name="Sample RSS",
+            fetch_method=FetchMethod.RSS,
+            base_url="https://example.com",
+        )
+    )
+    db.upsert_article(
+        Article(
+            source_key="sample_rss",
+            url="https://example.com/keyword",
+            normalized_url="https://example.com/keyword",
+            title="NewModel announcement",
+            summary="NewModel technology",
+            content="NewModel technology is useful.",
+            published_at=datetime.now(),
+            category="official",
+            tags=["NewModel"],
+        )
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "extract-keywords",
+            "--days",
+            "7",
+            "--min-count",
+            "1",
+            "--top-n",
+            "20",
+            "--keywords-path",
+            str(keywords_file),
+            "--append",
+            "--config-dir",
+            str(cli_config_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    updated = keywords_file.read_text(encoding="utf-8")
+    assert "# Existing category" in updated
+    assert "stopwords_general:" in updated
+    assert '"newmodel"' in updated
 
 
 def test_cli_stats_with_ai_status(cli_config_dir: Path):

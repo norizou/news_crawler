@@ -116,7 +116,8 @@ def aia_success_response() -> dict:
                 "message": {
                     "content": (
                         '{"title_ja": "新しいAIモデルのブレイクスルー", '
-                        '"summary_ja": "新しいAIモデルに関する重要な発見の要約。"}'
+                        '"summary_ja": "新しいAIモデルに関する重要な発見の要約。", '
+                        '"keywords": ["deepseek", "transformer", "ai"]}'
                     )
                 }
             }

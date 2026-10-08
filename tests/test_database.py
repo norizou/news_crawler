@@ -181,6 +181,34 @@ def test_ai_schema_migration(temp_db: Database, sample_source: SourceConfig):
     assert saved_art.summary_ja == ""
 
 
+def test_save_ai_result_merges_existing_tags(temp_db: Database, sample_source: SourceConfig):
+    """Test AI keywords are merged with existing source tags."""
+    temp_db.upsert_source(sample_source)
+    article = Article(
+        source_key="test_source",
+        url="https://example.com/tag-merge",
+        normalized_url="https://example.com/tag-merge",
+        title="Tagged article",
+        content="Article content",
+        category="official",
+        tags=["RSS", "OpenAI"],
+    )
+    saved_art, _, _ = temp_db.upsert_article(article)
+
+    temp_db.save_ai_result(
+        article_id=saved_art.id,
+        title_ja="タグ記事",
+        summary_ja="タグ要約",
+        model="test-model",
+        prompt_version="1",
+        input_hash="hash",
+        keywords=["openai", "MCP", ""],
+    )
+
+    result = temp_db.get_recent_articles(days=7, limit=1)[0]
+    assert result.tags == ["RSS", "OpenAI", "MCP"]
+
+
 def test_ai_status_content_change_reset(temp_db: Database, sample_source: SourceConfig):
     """Test that content changes reset AI status to pending."""
     temp_db.upsert_source(sample_source)
@@ -205,6 +233,7 @@ def test_ai_status_content_change_reset(temp_db: Database, sample_source: Source
         model="test-model",
         prompt_version="1",
         input_hash="old_hash",
+        keywords=[],
     )
 
     # Update content
@@ -241,6 +270,7 @@ def test_ai_status_unchanged_content_preserved(temp_db: Database, sample_source:
         model="test-model",
         prompt_version="1",
         input_hash="old_hash",
+        keywords=[],
     )
 
     # Upsert with same content
@@ -339,6 +369,7 @@ def test_get_pending_articles(temp_db: Database, sample_source: SourceConfig):
         model="test-model",
         prompt_version="1",
         input_hash="hash",
+        keywords=[],
     )
 
     pending = temp_db.get_pending_articles(days=7, limit=10)
@@ -368,12 +399,14 @@ def test_save_ai_result(temp_db: Database, sample_source: SourceConfig):
         model="test-model",
         prompt_version="1",
         input_hash="test_hash",
+        keywords=["ai", "test", "keyword"],
     )
 
     updated = temp_db.get_recent_articles(days=7, limit=1)[0]
     assert updated.ai_status == "completed"
     assert updated.title_ja == "テスト記事"
     assert updated.summary_ja == "テスト要約"
+    assert updated.tags == ["ai", "test", "keyword"]
     assert updated.ai_model == "test-model"
     assert updated.ai_prompt_version == "1"
     assert updated.ai_input_hash == "test_hash"
@@ -430,6 +463,7 @@ def test_japanese_search(temp_db: Database, sample_source: SourceConfig):
         model="test-model",
         prompt_version="1",
         input_hash="hash",
+        keywords=[],
     )
 
     # Search in Japanese - may return empty if FTS not fully set up in test
@@ -463,6 +497,7 @@ def test_japanese_search_short_term_fallback(temp_db: Database, sample_source: S
         model="test-model",
         prompt_version="1",
         input_hash="hash",
+        keywords=[],
     )
 
     # Search for very short term (should use LIKE fallback)
@@ -507,6 +542,7 @@ def test_unified_search_english_and_japanese(temp_db: Database, sample_source: S
         model="test-model",
         prompt_version="1",
         input_hash="hash",
+        keywords=[],
     )
 
     # Search for "transformer" (should find English article)
@@ -546,6 +582,7 @@ def test_stats_with_ai_status(temp_db: Database, sample_source: SourceConfig):
                 model="test-model",
                 prompt_version="1",
                 input_hash="hash",
+                keywords=[],
             )
         elif i == 1:
             temp_db.save_ai_failure(article_id=saved.id, error_message="Error")

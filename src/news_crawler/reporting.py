@@ -167,6 +167,11 @@ def generate_markdown_report(
         ]
         if ja_texts:
             ja_freq = analyzer.analyze_japanese(ja_texts)
+            # Extract keywords from tags and merge
+            tags_list = [a.tags for a in articles if a.tags]
+            if tags_list:
+                tags_freq = analyzer.extract_from_tags(tags_list)
+                ja_freq.update(tags_freq)
             if ja_freq:
                 wc_path = assets_dir / "wordcloud_ja.png"
 
@@ -185,6 +190,11 @@ def generate_markdown_report(
         # falling back to English word extractor if Japanese analysis returns empty.
         orig_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
         en_freq = analyzer.analyze_japanese(orig_texts) or analyzer.analyze_english(orig_texts)
+        # Extract keywords from tags and merge
+        tags_list = [a.tags for a in articles if a.tags]
+        if tags_list:
+            tags_freq = analyzer.extract_from_tags(tags_list)
+            en_freq.update(tags_freq)
         if en_freq:
             wc_path = assets_dir / "wordcloud_original.png"
 

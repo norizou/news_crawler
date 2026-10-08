@@ -51,6 +51,12 @@ uv run news-crawler enrich --days 7 --llm local_ollama
 # 失敗した記事を再試行
 uv run news-crawler enrich --days 7 --retry-failed
 
+# 記事タグと本文からトレンドキーワード候補を抽出
+uv run news-crawler extract-keywords --days 30 --min-count 3 --top-n 30
+
+# 確認後、候補を ai_keywords.yaml に追記
+uv run news-crawler extract-keywords --days 30 --min-count 3 --append
+
 # 日付別ダイジェスト生成
 uv run news-crawler digest --days 7
 
@@ -93,8 +99,14 @@ npm run lint:fix
 2. **データ永続化 (SQLite + FTS5)**:
    - 埋め込み・pgvector は初期スコープ外とし、SQLite FTS5 による高速キーワード検索を採用。
    - `data/articles.db` は gitignore 対象。
+   - AI抽出キーワードと既存タグは `articles.tags` にマージして保存する。
 
-3. **公開リポジトリのセキュリティ & クリーン性**:
+3. **キーワード抽出と辞書更新**:
+   - `enrich` はLLMから記事ごとのキーワードを抽出し、既存タグを保持したまま保存する。
+   - `extract-keywords` はタグと本文を統計的に集計し、`config/ai_keywords.yaml` の `stopwords_extraction` を適用する。
+   - `--append` は候補語を追加するため、内容を確認してから実行する。
+
+4. **公開リポジトリのセキュリティ & クリーン性**:
    - 秘密情報（API キー、Webhook URL 等）や取得データ本体は Git にコミットしない。
    - `config/sources.example.yaml` をテンプレートとして公開し、実運用設定は `config/sources.yaml` で管理。
    - Windows Node.js への依存を排除し、WSL2 ネイティブ環境で完結させる。

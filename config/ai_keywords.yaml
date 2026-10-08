@@ -20,7 +20,7 @@ ai_keywords:
   - cv
   - reinforcement learning
   - rl
-  
+
   # モデル・アーキテクチャ
   - bert
   - gpt-4
@@ -41,7 +41,7 @@ ai_keywords:
   - finetune
   - pretraining
   - checkpoint
-  
+
   # アプリケーション
   - chatbot
   - agent
@@ -54,7 +54,7 @@ ai_keywords:
   - translation
   - coding
   - reasoning
-  
+
   # 企業・組織
   - openai
   - google
@@ -64,7 +64,7 @@ ai_keywords:
   - hugging face
   - microsoft
   - nvidia
-  
+
   # 日本語用語
   - 人工知能
   - 機械学習
@@ -173,3 +173,304 @@ stopwords_general:
   - she
   - her
   - hers
+
+# キーワード抽出用追加ストップワード（extract-keywords で除外する一般的な用語）
+stopwords_extraction:
+  - the
+  - and
+  - to
+  - of
+  - in
+  - is
+  - for
+  - "on"
+  - with
+  - as
+  - at
+  - by
+  - an
+  - be
+  - this
+  - that
+  - these
+  - those
+  - it
+  - its
+  - they
+  - them
+  - their
+  - there
+  - here
+  - from
+  - or
+  - but
+  - not
+  - "no"
+  - nor
+  - so
+  - than
+  - too
+  - very
+  - just
+  - also
+  - all
+  - any
+  - both
+  - each
+  - few
+  - more
+  - most
+  - other
+  - some
+  - such
+  - only
+  - own
+  - same
+  - will
+  - would
+  - shall
+  - should
+  - can
+  - could
+  - may
+  - might
+  - must
+  - have
+  - has
+  - had
+  - do
+  - does
+  - did
+  - am
+  - was
+  - were
+  - been
+  - being
+  - get
+  - got
+  - gotten
+  - go
+  - goes
+  - went
+  - gone
+  - come
+  - comes
+  - came
+  - make
+  - makes
+  - made
+  - take
+  - takes
+  - took
+  - taken
+  - see
+  - sees
+  - saw
+  - seen
+  - know
+  - knows
+  - knew
+  - known
+  - think
+  - thinks
+  - thought
+  - want
+  - wants
+  - wanted
+  - use
+  - uses
+  - used
+  - say
+  - says
+  - said
+  - tell
+  - tells
+  - told
+  - ask
+  - asks
+  - asked
+  - work
+  - works
+  - worked
+  - seem
+  - seems
+  - seemed
+  - feel
+  - feels
+  - felt
+  - try
+  - tries
+  - tried
+  - leave
+  - leaves
+  - left
+  - call
+  - calls
+  - called
+  - out
+  - over
+  - up
+  - without
+  - about
+  - above
+  - across
+  - after
+  - against
+  - along
+  - among
+  - around
+  - before
+  - behind
+  - below
+  - beneath
+  - beside
+  - between
+  - beyond
+  - during
+  - except
+  - inside
+  - into
+  - near
+  - outside
+  - past
+  - since
+  - through
+  - throughout
+  - till
+  - toward
+  - under
+  - underneath
+  - until
+  - upon
+  - within
+  - one
+  - more
+  - data
+  - print
+  - first
+  - be
+  - agents
+  - gpt
+  - astra
+  - chatgpt
+  - models
+  - post
+  - if
+  - code
+  - text
+  - time
+  - 導入
+  - 業務
+  - データ
+  - 情報
+  - ツール
+  - 確認
+  - 活用
+  - 企業
+  - 対応
+  - 時間
+  - 方法
+  - 内容
+  - 結果
+  - 問題
+  - 機能
+  - システム
+  - サービス
+  - 製品
+  - 開発
+  - 利用
+  - 使用
+  - 提供
+  - 実施
+  - 運用
+  - 管理
+  - 設定
+  - 更新
+  - 追加
+  - 削除
+  - 変更
+  - 作成
+  - 実行
+  - 処理
+  - 取得
+  - 表示
+  - 入力
+  - 出力
+  - 保存
+  - 読み込み
+  - 書き込み
+  - 検索
+  - 比較
+  - 分析
+  - 評価
+  - 検証
+  - 改善
+  - 最適化
+  - 自動化
+  - 効率化
+  - 標準化
+  - 統合
+  - 連携
+  - 共有
+  - 配布
+  - 公開
+  - 非公開
+  - 有料
+  - 無料
+  - 商用
+  - 個人
+  - 組織
+  - チーム
+  - グループ
+  - 部門
+  - 部署
+  - 会社
+  - 事業
+  - プロジェクト
+  - 計画
+  - 設計
+  - 構築
+  - 移行
+  - 保守
+  - サポート
+  - ヘルプ
+  - ドキュメント
+  - マニュアル
+  - ガイド
+  - チュートリアル
+  - サンプル
+  - 例
+  - ケース
+  - シナリオ
+  - 使う
+  - 社内
+  - 支援
+  - 判断
+  - おく
+  - 必要
+  - 効果
+  - よる
+  - 自社
+  - ステップ
+  - 事例
+  - サイト
+  - 課題
+  - 関連
+  - 出典
+  - 決める
+  - 任せる
+  - 作業
+  - 記事
+  - 発表
+  - 回答
+  - 生成
+  - 範囲
+  - 手順
+  - 以下
+  - 場合
+  - 担当者
+  - 削減
+  - 顧客
+  - 権限
+  - 費用
+  - プラン

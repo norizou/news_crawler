@@ -158,6 +158,7 @@ class AIProcessor:
                 model=self.config.model,
                 prompt_version=self.config.prompt_version,
                 input_hash=input_hash,
+                keywords=ai_result.keywords,
             )
 
     def _compute_input_hash(self, article: Article) -> str:

@@ -1,5 +1,8 @@
 """Tests for text analyzer using SudachiPy."""
 
+from datetime import datetime, timedelta
+
+from news_crawler.models import Article
 from news_crawler.text_analyzer import TextAnalyzer
 
 
@@ -125,3 +128,128 @@ stopwords_general:
     assert "large" not in counter
     assert "openai" not in counter  # Not in whitelist
     assert "language" not in counter  # Not in whitelist
+
+
+def test_extract_from_tags():
+    analyzer = TextAnalyzer()
+    tags_list = [
+        ["ai", "machine learning", "deep learning"],
+        ["ai", "nlp", "transformer"],
+        ["deep learning", "computer vision"],
+    ]
+
+    counter = analyzer.extract_from_tags(tags_list)
+
+    assert counter["ai"] == 2
+    assert counter["machine learning"] == 1
+    assert counter["deep learning"] == 2
+    assert counter["nlp"] == 1
+    assert counter["transformer"] == 1
+    assert counter["computer vision"] == 1
+
+
+def test_extract_from_tags_with_stopwords(tmp_path):
+    stopwords_file = tmp_path / "test_stopwords.yaml"
+    stopwords_file.write_text("""
+ai_keywords:
+  - ai
+  - deep learning
+stopwords_general:
+  - new
+  - latest
+""", encoding="utf-8")
+
+    analyzer = TextAnalyzer(keywords_path=str(stopwords_file))
+    tags_list = [
+        ["ai", "new", "machine learning"],
+        ["ai", "latest", "nlp"],
+    ]
+
+    counter = analyzer.extract_from_tags(tags_list)
+
+    assert counter["ai"] == 2
+    assert counter["machine learning"] == 1
+    assert counter["nlp"] == 1
+    assert "new" not in counter
+    assert "latest" not in counter
+
+
+def test_extraction_stopwords_are_loaded_from_config(tmp_path):
+    """Test extraction-specific stopwords are loaded independently."""
+    keywords_file = tmp_path / "keywords.yaml"
+    keywords_file.write_text(
+        """ai_keywords: []
+stopwords_extraction:
+  - "on"
+  - 生成
+""",
+        encoding="utf-8",
+    )
+
+    analyzer = TextAnalyzer(keywords_path=str(keywords_file))
+    article = Article(
+        source_key="test",
+        url="https://example.com/stopwords",
+        normalized_url="https://example.com/stopwords",
+        title="On-device model",
+        summary="",
+        content="on-device model",
+        published_at=datetime.now() - timedelta(days=1),
+        category="test",
+        title_ja="生成AIモデル",
+        summary_ja="",
+        ai_status="completed",
+    )
+
+    keywords = dict(analyzer.extract_trending_keywords([article], min_count=1, top_n=20))
+    assert "on" not in keywords
+    assert "生成" not in keywords
+
+
+def test_extract_trending_keywords():
+    analyzer = TextAnalyzer()
+    articles = [
+        Article(
+            source_key="test",
+            url="https://example.com/1",
+            normalized_url="https://example.com/1",
+            title="DeepSeek-V3 Released",
+            summary="New AI model",
+            content="DeepSeek-V3 is a new AI model with transformer architecture.",
+            published_at=datetime.now() - timedelta(days=1),
+            category="test",
+            tags=["deepseek", "transformer", "ai"],
+        ),
+        Article(
+            source_key="test",
+            url="https://example.com/2",
+            normalized_url="https://example.com/2",
+            title="MCP Protocol",
+            summary="Model Context Protocol",
+            content="MCP enables AI agents to interact with tools.",
+            published_at=datetime.now() - timedelta(days=1),
+            category="test",
+            tags=["mcp", "agent", "ai"],
+        ),
+        Article(
+            source_key="test",
+            url="https://example.com/3",
+            normalized_url="https://example.com/3",
+            title="FlashAttention",
+            summary="Attention optimization",
+            content="FlashAttention improves transformer efficiency.",
+            published_at=datetime.now() - timedelta(days=1),
+            category="test",
+            tags=["flashattention", "transformer", "optimization"],
+        ),
+    ]
+
+    trending = analyzer.extract_trending_keywords(articles, min_count=1, top_n=20)
+
+    # Check that keywords from tags are extracted
+    keyword_dict = dict(trending)
+    assert keyword_dict.get("deepseek", 0) >= 1
+    assert keyword_dict.get("transformer", 0) >= 2  # Appears in 2 articles
+    assert keyword_dict.get("ai", 0) >= 2
+    assert keyword_dict.get("mcp", 0) >= 1
+    assert keyword_dict.get("flashattention", 0) >= 1
