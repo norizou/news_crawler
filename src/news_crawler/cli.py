@@ -1,6 +1,7 @@
 """Command-line interface for News Crawler."""
 
 import asyncio
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import click
@@ -11,7 +12,9 @@ from news_crawler.ai_processor import AIProcessor
 from news_crawler.config import load_config
 from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
-from news_crawler.reporting import generate_markdown_report
+from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
+from news_crawler.digest import write_digests
+from news_crawler.reporting import generate_markdown_report, resolve_report_period
 
 console = Console()
 
@@ -38,14 +41,26 @@ def main() -> None:
     help="Simulate crawl without persisting articles to database.",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
+def crawl(
+    source_key: str | None,
+    dry_run: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Execute scraping across registered AI information sources."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     coordinator = CrawlCoordinator(app_config)
 
     mode_text = "[yellow][DRY RUN][/yellow] " if dry_run else ""
@@ -112,11 +127,44 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
     help="Predefined period for report.",
 )
 @click.option(
+    "--title",
+    type=str,
+    default=None,
+    help="Custom report title (overrides config).",
+)
+@click.option(
+    "--tags",
+    "tags",
+    type=str,
+    multiple=True,
+    help="Frontmatter tags (repeatable or comma-separated, e.g. --tags ai,report).",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--category",
     "-c",
     type=str,
     default=None,
     help="Filter report by category (e.g. 'official', 'media').",
+)
+@click.option(
+    "--exclude-source",
+    "exclude_source_keys",
+    type=str,
+    multiple=True,
+    help="Source key to exclude from report (repeatable, e.g. -x deepseek_hf).",
+)
+@click.option(
+    "--exclude-duplicates/--include-duplicates",
+    default=False,
+    help="Exclude articles marked as cross-source duplicates via 'news-crawler dedupe' "
+    "(default: include).",
 )
 @click.option(
     "--output",
@@ -128,7 +176,7 @@ def crawl(source_key: str | None, dry_run: bool, config_dir: Path) -> None:
 @click.option(
     "--visualize/--no-visualize",
     default=None,
-    help="Enable/disable word cloud and charts (default: enabled in config).",
+    help="Enable/disable word cloud (default: enabled in config).",
 )
 @click.option(
     "--top-n",
@@ -147,18 +195,33 @@ def report(
     start_date: str | None,
     end_date: str | None,
     period: str | None,
+    title: str | None,
+    tags: tuple[str, ...],
+    sources_file: Path | None,
     category: str | None,
+    exclude_source_keys: tuple[str, ...],
+    exclude_duplicates: bool,
     output: Path | None,
     visualize: bool | None,
     top_n: int | None,
     config_dir: Path,
 ) -> None:
     """Generate Markdown report from crawled articles with visualizations."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
 
     # Override config with CLI options
     report_cfg = app_config.report.model_copy()
+    if title is not None:
+        report_cfg.title = title
+    if tags:
+        parsed_tags: list[str] = []
+        for t_item in tags:
+            for t in t_item.split(","):
+                t_clean = t.strip()
+                if t_clean and t_clean not in parsed_tags:
+                    parsed_tags.append(t_clean)
+        report_cfg.tags = parsed_tags
     if visualize is not None:
         report_cfg.visualize = visualize
     if top_n is not None:
@@ -168,7 +231,12 @@ def report(
         from datetime import datetime
 
         today_str = datetime.now().strftime("%Y%m%d")
-        output = Path(app_config.crawler.output_dir) / f"weekly_report_{today_str}.md"
+        report_dir = report_cfg.output_dir or app_config.crawler.output_dir
+        output = Path(report_dir) / f"weekly_report_{today_str}.md"
+
+    # Sources disabled in config are excluded from reports by default too
+    disabled_source_keys = [key for key, src in app_config.sources.items() if not src.enabled]
+    combined_exclude_source_keys = sorted(set(exclude_source_keys) | set(disabled_source_keys))
 
     try:
         md_content = generate_markdown_report(
@@ -178,6 +246,8 @@ def report(
             end_date=end_date,
             period=period,
             category=category,
+            exclude_source_keys=combined_exclude_source_keys or None,
+            exclude_duplicates=exclude_duplicates,
             output_path=output,
             report_config=report_cfg,
         )
@@ -212,14 +282,34 @@ def report(
     help="Include failed articles in enrichment.",
 )
 @click.option(
+    "--llm",
+    type=str,
+    default=None,
+    help="Use only this endpoint from ai.endpoints. Default: ai.endpoint_order.",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def enrich(days: int, limit: int, retry_failed: bool, config_dir: Path) -> None:
+def enrich(
+    days: int,
+    limit: int,
+    retry_failed: bool,
+    llm: str | None,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Enrich articles with AI-generated Japanese title and summary."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
 
     if not app_config.ai.enabled:
         console.print("[yellow]AI enrichment is disabled in configuration.[/yellow]")
@@ -227,13 +317,18 @@ def enrich(days: int, limit: int, retry_failed: bool, config_dir: Path) -> None:
 
     db = Database(app_config.crawler.database_path)
     processor = AIProcessor(app_config.ai, db)
+    processor.only_endpoint = llm
 
     console.print(f"Starting AI enrichment for articles from last {days} days...")
     console.print(f"Max articles: {limit}, Retry failed: {retry_failed}")
 
-    stats = asyncio.run(
-        processor.enrich_articles(days=days, limit=limit, retry_failed=retry_failed)
-    )
+    try:
+        stats = asyncio.run(
+            processor.enrich_articles(days=days, limit=limit, retry_failed=retry_failed)
+        )
+    except (RuntimeError, ValueError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1) from e
 
     console.print("\n[bold]Enrichment Summary:[/bold]")
     console.print(f"  Total processed: {stats['total']}")
@@ -259,14 +354,27 @@ def enrich(days: int, limit: int, retry_failed: bool, config_dir: Path) -> None:
     help="Max search results (default: 10).",
 )
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def search(query: str, category: str | None, limit: int, config_dir: Path) -> None:
+def search(
+    query: str,
+    category: str | None,
+    limit: int,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
     """Search articles using SQLite FTS5 full-text index."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
 
     results = db.search_articles(query, category=category, limit=limit)
@@ -294,16 +402,139 @@ def search(query: str, category: str | None, limit: int, config_dir: Path) -> No
         console.print()
 
 
-@main.command("list-sources")
+@main.command()
+@click.option(
+    "--days",
+    "-d",
+    type=int,
+    default=None,
+    help="Number of days to scan for duplicates (default: 7).",
+)
+@click.option(
+    "--start-date",
+    type=str,
+    default=None,
+    help="Start date for the scan (YYYY-MM-DD).",
+)
+@click.option(
+    "--end-date",
+    type=str,
+    default=None,
+    help="End date for the scan (YYYY-MM-DD).",
+)
+@click.option(
+    "--period",
+    "-p",
+    type=click.Choice(["week", "month", "quarter"]),
+    default=None,
+    help="Predefined period for the scan.",
+)
+@click.option(
+    "--min-title-len",
+    type=int,
+    default=DEFAULT_MIN_TITLE_LEN,
+    help=f"Minimum normalized title length to consider for matching "
+    f"(default: {DEFAULT_MIN_TITLE_LEN}).",
+)
+@click.option(
+    "--dry-run/--apply",
+    "dry_run",
+    default=True,
+    help="Preview detected duplicates without writing to the database (default: dry-run).",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
 @click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def list_sources(config_dir: Path) -> None:
+def dedupe(
+    days: int | None,
+    start_date: str | None,
+    end_date: str | None,
+    period: str | None,
+    min_title_len: int,
+    dry_run: bool,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
+    """Detect and mark cross-source duplicate articles (same story, different outlet).
+
+    Matches are based on exact normalized-title equality across different
+    sources within the scanned window; the earliest-published article in each
+    cluster is kept as canonical. Idempotent and safe to re-run.
+    """
+    app_config = load_config(config_dir, sources_file=sources_file)
+    db = Database(app_config.crawler.database_path)
+
+    try:
+        start_at, end_at, _mode = resolve_report_period(days, start_date, end_date, period)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        ctx = click.get_current_context()
+        click.echo(ctx.get_help())
+        ctx.exit(1)
+        return
+
+    matches = run_dedupe(
+        db, start_at, end_at, dry_run=dry_run, min_title_len=min_title_len
+    )
+
+    mode_text = "[yellow][DRY RUN][/yellow] " if dry_run else ""
+    if not matches:
+        console.print(f"{mode_text}No cross-source duplicates found.")
+        return
+
+    table = Table(title=f"{'[DRY RUN] ' if dry_run else ''}Detected Duplicates ({len(matches)})")
+    table.add_column("Canonical Source", style="green")
+    table.add_column("Canonical Title", overflow="fold")
+    table.add_column("Duplicate Source", style="yellow")
+    table.add_column("Duplicate Title", overflow="fold")
+    table.add_column("Score", justify="right")
+
+    for m in matches:
+        table.add_row(
+            m.canonical.source_key,
+            m.canonical.title,
+            m.duplicate.source_key,
+            m.duplicate.title,
+            f"{m.score:.2f}",
+        )
+
+    console.print(table)
+    if dry_run:
+        console.print(
+            f"{len(matches)} duplicate(s) detected. Re-run with [bold]--apply[/bold] "
+            "to persist."
+        )
+    else:
+        console.print(f"[green]{len(matches)} duplicate(s) marked in the database.[/green]")
+
+
+@main.command("list-sources")
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def list_sources(sources_file: Path | None, config_dir: Path) -> None:
     """List all registered sources from configuration."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
 
     table = Table(title="Registered AI Sources")
     table.add_column("Key", style="cyan")
@@ -323,14 +554,21 @@ def list_sources(config_dir: Path) -> None:
 
 @main.command()
 @click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
     help="Path to configuration directory.",
 )
-def stats(config_dir: Path) -> None:
+def stats(sources_file: Path | None, config_dir: Path) -> None:
     """Show database statistics."""
-    app_config = load_config(config_dir)
+    app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
     info = db.get_stats()
 
@@ -347,6 +585,96 @@ def stats(config_dir: Path) -> None:
         for status, count in info["ai_status"].items():
             color = "green" if status == "completed" else "yellow" if status == "pending" else "red"
             console.print(f"  {status.capitalize()}: [{color}]{count}[/{color}]")
+
+
+@main.command()
+@click.option("--days", "-d", type=int, default=None, help="Last N days (default: 7).")
+@click.option("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD).")
+@click.option("--end-date", type=str, default=None, help="End date (YYYY-MM-DD).")
+@click.option(
+    "--only-summarized",
+    is_flag=True,
+    default=False,
+    help="Only list articles that have an AI summary (skip days with none).",
+)
+@click.option(
+    "--exclude-duplicates/--include-duplicates",
+    default=True,
+    help="Exclude cross-source duplicates marked by 'dedupe' (default: exclude).",
+)
+@click.option(
+    "--output-dir",
+    "-o",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Root directory (default: report.output_dir or crawler.output_dir). "
+    "Files go to <root>/<YYYY>/<date>.md.",
+)
+@click.option(
+    "--sources-file",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to custom sources configuration YAML file.",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def digest(
+    days: int | None,
+    start_date: str | None,
+    end_date: str | None,
+    only_summarized: bool,
+    exclude_duplicates: bool,
+    output_dir: Path | None,
+    sources_file: Path | None,
+    config_dir: Path,
+) -> None:
+    """Write one Markdown file per date (<root>/<YYYY>/<YYYY-MM-DD>.md) with AI summaries."""
+    app_config = load_config(config_dir, sources_file=sources_file)
+    db = Database(app_config.crawler.database_path)
+    try:
+        start_at, end_at, _mode = resolve_report_period(
+            days if days is not None or start_date else 7, start_date, end_date, None
+        )
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise SystemExit(1) from e
+
+    # Always cover whole days: `--days N` starts mid-day, which would otherwise write a
+    # truncated file for the oldest day and overwrite that day's complete digest.
+    start_at = datetime.combine(start_at.date(), time.min)
+    first_day, last_day = start_at.date(), (end_at - timedelta(microseconds=1)).date()
+
+    disabled = [k for k, src in app_config.sources.items() if not src.enabled]
+    articles = db.get_articles_in_range(
+        start_at,
+        end_at,
+        exclude_source_keys=disabled or None,
+        exclude_duplicates=exclude_duplicates,
+    )
+    root = output_dir or Path(app_config.report.output_dir or app_config.crawler.output_dir)
+    names = {k: src.name for k, src in app_config.sources.items()}
+    written, skipped = write_digests(
+        articles,
+        root,
+        names,
+        only_summarized=only_summarized,
+        day_range=(first_day, last_day),
+        title_prefix=app_config.report.digest_title,
+        tags=app_config.report.digest_tags,
+    )
+    for path, n in written:
+        console.print(f"  {path}  ({n})")
+    for day in skipped:
+        console.print(
+            f"[yellow]Skipped {day}: outside {first_day}..{last_day} "
+            "(re-dated article; writing it would overwrite that day's digest)[/yellow]"
+        )
+    console.print(f"[green]Wrote {len(written)} daily digest(s) under {root}[/green]")
 
 
 if __name__ == "__main__":

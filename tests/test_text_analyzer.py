@@ -25,7 +25,8 @@ def test_analyze_japanese():
     assert "の" not in counter
     assert "が" not in counter
     assert "ました" not in counter
-    assert "非常に" not in counter  # This might be an adverb/形状詞 depending on dict, but usually we want to filter common filler
+    # Filter common filler
+    assert "非常に" not in counter
 
 def test_analyze_japanese_with_keywords_filter(tmp_path):
     # Create a test keywords file

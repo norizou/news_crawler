@@ -39,6 +39,31 @@ def test_parse_datetime_iso():
     assert dt.day == 14
 
 
+def test_parse_datetime_japanese_and_fuzzy():
+    dt = parse_datetime("2026年9月12日")
+    assert isinstance(dt, datetime)
+    assert dt.year == 2026
+    assert dt.month == 9
+    assert dt.day == 12
+
+    fuzzy_dt = parse_datetime("2026/09/17 12:24更新")
+    assert isinstance(fuzzy_dt, datetime)
+    assert fuzzy_dt.year == 2026
+    assert fuzzy_dt.month == 9
+    assert fuzzy_dt.day == 17
+    assert fuzzy_dt.hour == 12
+    assert fuzzy_dt.minute == 24
+
+
+def test_normalize_title_for_dedupe():
+    from news_crawler.normalizer import normalize_title_for_dedupe
+
+    assert normalize_title_for_dedupe("  OpenAI   GPT-5 発表  ") == "OpenAIGPT-5発表"
+    # Full-width to half-width via NFKC
+    assert normalize_title_for_dedupe("ＡＩ　モデル") == "AIモデル"
+    assert normalize_title_for_dedupe("") == ""
+
+
 def test_parse_datetime_invalid():
     assert parse_datetime(None) is None
     assert parse_datetime("") is None

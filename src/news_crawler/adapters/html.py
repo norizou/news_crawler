@@ -32,7 +32,7 @@ class HTMLAdapter(BaseAdapter):
         ) as client:
             resp = await client.get(list_url)
             resp.raise_for_status()
-            list_soup = BeautifulSoup(resp.text, "html.parser")
+            list_soup = self._make_soup(resp.content)
 
             # Discover article links
             article_urls: list[str] = []
@@ -72,7 +72,7 @@ class HTMLAdapter(BaseAdapter):
                     art_resp = await client.get(url)
                     if art_resp.status_code != 200:
                         continue
-                    art = self._parse_article_page(url, art_resp.text)
+                    art = self._parse_article_page(url, art_resp.content)
                     if art:
                         articles.append(art)
                 except Exception:
@@ -81,9 +81,20 @@ class HTMLAdapter(BaseAdapter):
 
         return articles
 
-    def _parse_article_page(self, url: str, html: str) -> Article | None:
+    def _make_soup(self, content: bytes) -> BeautifulSoup:
+        """Build a BeautifulSoup from raw response bytes.
+
+        BeautifulSoup detects the encoding from BOM and <meta charset>
+        declarations; ``source.encoding`` (e.g. 'shift_jis') overrides it
+        for sites whose charset is unreliable.
+        """
+        return BeautifulSoup(
+            content, "html.parser", from_encoding=self.source.encoding
+        )
+
+    def _parse_article_page(self, url: str, html: bytes) -> Article | None:
         """Extract structured fields from article HTML."""
-        soup = BeautifulSoup(html, "html.parser")
+        soup = self._make_soup(html)
 
         # 1. Title
         title = ""

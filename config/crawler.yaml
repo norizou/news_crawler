@@ -25,6 +25,19 @@ report:
 
 ai:
   enabled: true
+  # 使うLLMは endpoint_order の先頭から順に試し、最初に到達できて対象モデルがロード済みのものを使う。
+  # 特定の1つだけ使うとき: uv run news-crawler enrich --llm local_ollama
+  endpoint_order: [local_ollama, local_lmstudio]
+  endpoints:
+    - name: local_ollama
+      proxy_url: "http://localhost:11434/v1"
+      model: "llama-3-3-70b-instruct"
+      max_tokens: 1000
+    - name: local_lmstudio
+      proxy_url: "http://localhost:1234/v1"
+      model: "google/gemma-4-e4b"
+      max_tokens: 3000
+  # 下2行は endpoints 未使用時の単一エンドポイント設定（後方互換）
   proxy_url: "http://localhost:11434/v1"
   model: "llama-3-3-70b-instruct"
   request_interval: 2.0
@@ -32,6 +45,7 @@ ai:
   max_retries: 3
   max_input_chars: 8000
   max_articles_per_run: 50
+  max_tokens: 1000
   prompt_version: "1"
   system_prompt: |
     You are a professional translator and summarizer. Your task is to process the provided article and output a JSON object with the following structure:

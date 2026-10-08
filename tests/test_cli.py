@@ -84,16 +84,32 @@ def test_cli_report_period_options(cli_config_dir: Path):
     runner = CliRunner()
 
     # 1. Period month
-    res = runner.invoke(main, ["report", "--period", "month", "--config-dir", str(cli_config_dir)])
+    res = runner.invoke(
+        main, ["report", "--period", "month", "--config-dir", str(cli_config_dir)]
+    )
     assert res.exit_code == 0
     assert "Report generated successfully" in res.output
 
     # 2. Date range
-    res = runner.invoke(main, ["report", "--start-date", "2026-09-01", "--end-date", "2026-09-10", "--config-dir", str(cli_config_dir)])
+    res = runner.invoke(
+        main,
+        [
+            "report",
+            "--start-date",
+            "2026-09-01",
+            "--end-date",
+            "2026-09-10",
+            "--config-dir",
+            str(cli_config_dir),
+        ],
+    )
     assert res.exit_code == 0
 
     # 3. Conflict (days and period)
-    res = runner.invoke(main, ["report", "--days", "7", "--period", "week", "--config-dir", str(cli_config_dir)])
+    res = runner.invoke(
+        main,
+        ["report", "--days", "7", "--period", "week", "--config-dir", str(cli_config_dir)],
+    )
     assert res.exit_code == 1
     assert "Error" in res.output
 
@@ -137,3 +153,23 @@ def test_cli_stats_with_ai_status(cli_config_dir: Path):
     assert res_stats.exit_code == 0
     # AI status may or may not be shown depending on whether the section exists
     # Just verify stats command works
+
+
+def test_cli_dedupe(cli_config_dir: Path):
+    """Test dedupe command dry-run and apply."""
+    runner = CliRunner()
+    res = runner.invoke(main, ["dedupe", "--days", "7", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+    assert "No cross-source duplicates found" in res.output
+
+
+def test_cli_digest(cli_config_dir: Path, tmp_path: Path):
+    """Test digest command."""
+    runner = CliRunner()
+    out_dir = tmp_path / "digest_test"
+    res = runner.invoke(
+        main,
+        ["digest", "--days", "7", "-o", str(out_dir), "--config-dir", str(cli_config_dir)],
+    )
+    assert res.exit_code == 0
+    assert "daily digest(s)" in res.output

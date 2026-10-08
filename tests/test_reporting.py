@@ -60,7 +60,9 @@ def test_resolve_report_period():
     assert end == now
 
     # Date range
-    start, end, mode = resolve_report_period(start_date="2026-09-01", end_date="2026-09-05", base_now=now)
+    start, end, mode = resolve_report_period(
+        start_date="2026-09-01", end_date="2026-09-05", base_now=now
+    )
     assert mode == "date_range"
     assert start == datetime(2026, 9, 1)
     assert end == datetime(2026, 9, 6) # Exclusive end
@@ -276,3 +278,45 @@ def test_generate_markdown_report_failed_ai_fallback(tmp_path: Path):
     assert report_file.exists()
     assert "OpenAI Test Model Release" in md  # Original title should be used
     assert "A summary of the new release." in md  # Original summary should be used
+
+
+def test_generate_markdown_report_exclude_sources_and_duplicates(tmp_path: Path):
+    """Test exclude_source_keys and exclude_duplicates flags in reporting."""
+    db_file = tmp_path / "test.db"
+    db = Database(db_file)
+
+    s1 = SourceConfig(
+        key="src1", name="Source 1", category="official",
+        fetch_method=FetchMethod.HTML, base_url="https://example1.com"
+    )
+    s2 = SourceConfig(
+        key="src2", name="Source 2", category="media",
+        fetch_method=FetchMethod.HTML, base_url="https://example2.com"
+    )
+    db.upsert_source(s1)
+    db.upsert_source(s2)
+
+    now = datetime.now()
+    art1, _, _ = db.upsert_article(
+        Article(
+            source_key="src1", url="https://example1.com/1", normalized_url="https://example1.com/1",
+            title="Article One", summary="S1", content="C1", published_at=now, category="official"
+        )
+    )
+    art2, _, _ = db.upsert_article(
+        Article(
+            source_key="src2", url="https://example2.com/2", normalized_url="https://example2.com/2",
+            title="Article Two", summary="S2", content="C2", published_at=now, category="media"
+        )
+    )
+    db.mark_duplicate(article_id=art2.id, canonical_id=art1.id, score=1.0)
+
+    # Exclude source
+    md1 = generate_markdown_report(db, days=7, exclude_source_keys=["src2"])
+    assert "Article One" in md1
+    assert "Article Two" not in md1
+
+    # Exclude duplicates
+    md2 = generate_markdown_report(db, days=7, exclude_duplicates=True)
+    assert "Article One" in md2
+    assert "Article Two" not in md2

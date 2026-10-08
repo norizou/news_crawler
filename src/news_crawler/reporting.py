@@ -29,7 +29,9 @@ def resolve_report_period(
     # Check for conflicts
     specified = [x for x in [days is not None, start_date is not None, period is not None] if x]
     if len(specified) > 1:
-        raise ValueError("Only one of 'days', 'date range' (start/end), or 'period' can be specified.")
+        raise ValueError(
+            "Only one of 'days', 'date range' (start/end), or 'period' can be specified."
+        )
 
     if start_date or end_date:
         if not start_date:
@@ -75,6 +77,8 @@ def generate_markdown_report(
     end_date: str | None = None,
     period: str | None = None,
     category: str | None = None,
+    exclude_source_keys: list[str] | None = None,
+    exclude_duplicates: bool = False,
     output_path: str | Path | None = None,
     report_config: ReportConfig | None = None,
 ) -> str:
@@ -83,7 +87,13 @@ def generate_markdown_report(
 
     start_at, end_at, mode = resolve_report_period(days, start_date, end_date, period)
 
-    articles = db.get_articles_in_range(start_at, end_at, category=category)
+    articles = db.get_articles_in_range(
+        start_at,
+        end_at,
+        category=category,
+        exclude_source_keys=exclude_source_keys,
+        exclude_duplicates=exclude_duplicates,
+    )
 
     # Group by category and source
     by_category: dict[str, dict[str, list[Article]]] = defaultdict(lambda: defaultdict(list))
@@ -94,12 +104,28 @@ def generate_markdown_report(
 
     # FrontMatter
     now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    title_vars = {
+        "title": cfg.title,
+        "date": date_str,
+        "mode": mode,
+        "period_start": start_at.strftime("%Y-%m-%d"),
+        "period_end": (end_at - timedelta(seconds=1)).strftime("%Y-%m-%d"),
+    }
+    try:
+        report_title = cfg.title_template.format(**title_vars)
+    except (KeyError, ValueError):
+        report_title = f"{cfg.title} ({date_str})"
+
     frontmatter = {
-        "title": f"AI Trend Report ({now.strftime('%Y-%m-%d')})",
+        "title": report_title,
         "created": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "period": f"{start_at.strftime('%Y-%m-%d')} ~ {(end_at - timedelta(seconds=1)).strftime('%Y-%m-%d')}",
+        "period": (
+            f"{start_at.strftime('%Y-%m-%d')} ~ "
+            f"{(end_at - timedelta(seconds=1)).strftime('%Y-%m-%d')}"
+        ),
         "total_articles": len(articles),
-        "tags": ["ai", "report", "trends"],
+        "tags": cfg.tags,
         "visualization": cfg.visualize,
         "analysis_top_n": cfg.top_n,
         "analysis_category": category,
@@ -113,7 +139,8 @@ def generate_markdown_report(
     lines.append("---")
     lines.append("")
     lines.append(
-        f"期間: **{start_at.strftime('%Y-%m-%d')}** 〜 **{(end_at - timedelta(seconds=1)).strftime('%Y-%m-%d')}** "
+        f"期間: **{start_at.strftime('%Y-%m-%d')}** 〜 "
+        f"**{(end_at - timedelta(seconds=1)).strftime('%Y-%m-%d')}** "
         f"に収集された AI 関連ニュース・動向レポートです。"
     )
     lines.append("")
@@ -126,7 +153,10 @@ def generate_markdown_report(
         assets_dir = Path(output_path).parent / f"{Path(output_path).stem}_{cfg.output_assets_name}"
         assets_dir.mkdir(parents=True, exist_ok=True)
 
-        analyzer = TextAnalyzer(keywords_path=cfg.ai_keywords_path)
+        analyzer = TextAnalyzer(
+            keywords_path=cfg.ai_keywords_path,
+            sudachi_config_path=cfg.sudachi_config_path,
+        )
         viz = VisualizationGenerator(font_path=cfg.japanese_font_path)
 
         # Japanese analysis
@@ -139,37 +169,30 @@ def generate_markdown_report(
             ja_freq = analyzer.analyze_japanese(ja_texts)
             if ja_freq:
                 wc_path = assets_dir / "wordcloud_ja.png"
-                pie_path = assets_dir / "frequency_ja.png"
 
-                if viz.generate_wordcloud(ja_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height):
+                if viz.generate_wordcloud(
+                    ja_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height
+                ):
                     lines.append("### 日本語ワードクラウド")
                     lines.append(f"![日本語ワードクラウド]({assets_dir.name}/{wc_path.name})")
-                    lines.append("")
-
-                if viz.generate_pie_chart(ja_freq, pie_path, top_n=cfg.top_n, title="日本語頻出単語 (Top N)"):
-                    lines.append(f"### 日本語 Top {cfg.top_n} 単語分布")
-                    lines.append(f"![日本語単語頻度パイチャート]({assets_dir.name}/{pie_path.name})")
                     lines.append("")
         else:
             lines.append("### 日本語分析")
             lines.append("分析対象となる日本語コンテンツ（AI処理済み記事）がありませんでした。")
             lines.append("")
 
-        # Original analysis
-        en_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
-        en_freq = analyzer.analyze_english(en_texts)
+        # Original analysis: try Japanese morphological analysis first for domestic sources,
+        # falling back to English word extractor if Japanese analysis returns empty.
+        orig_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
+        en_freq = analyzer.analyze_japanese(orig_texts) or analyzer.analyze_english(orig_texts)
         if en_freq:
             wc_path = assets_dir / "wordcloud_original.png"
-            pie_path = assets_dir / "frequency_original.png"
 
-            if viz.generate_wordcloud(en_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height):
+            if viz.generate_wordcloud(
+                en_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height
+            ):
                 lines.append("### 原文ワードクラウド")
                 lines.append(f"![原文ワードクラウド]({assets_dir.name}/{wc_path.name})")
-                lines.append("")
-
-            if viz.generate_pie_chart(en_freq, pie_path, top_n=cfg.top_n, title="原文頻出単語 (Top N)"):
-                lines.append(f"### 原文 Top {cfg.top_n} 単語分布")
-                lines.append(f"![原文単語頻度パイチャート]({assets_dir.name}/{pie_path.name})")
                 lines.append("")
         else:
             lines.append("### 原文分析")
