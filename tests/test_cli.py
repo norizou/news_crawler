@@ -145,3 +145,15 @@ def test_cli_dedupe(cli_config_dir: Path):
     res = runner.invoke(main, ["dedupe", "--days", "7", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 0
     assert "No cross-source duplicates found" in res.output
+
+
+def test_cli_digest(cli_config_dir: Path, tmp_path: Path):
+    """Test digest command."""
+    runner = CliRunner()
+    out_dir = tmp_path / "digest_test"
+    res = runner.invoke(
+        main,
+        ["digest", "--days", "7", "-o", str(out_dir), "--config-dir", str(cli_config_dir)],
+    )
+    assert res.exit_code == 0
+    assert "daily digest(s)" in res.output

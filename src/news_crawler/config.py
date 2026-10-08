@@ -151,6 +151,11 @@ class ReportConfig(BaseModel):
         default="config/sudachi.json",
         description="Path to Sudachi config JSON (optional user dictionaries)",
     )
+    digest_title: str = Field(default="AI News", description="Title prefix for daily digest")
+    digest_tags: list[str] = Field(
+        default_factory=lambda: ["ai", "news", "daily"],
+        description="Frontmatter tags for daily digest",
+    )
 
 
 class AppConfig(BaseModel):
