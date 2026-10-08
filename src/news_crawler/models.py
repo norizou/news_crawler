@@ -54,6 +54,11 @@ class SourceConfig(BaseModel):
         default=None, description="Selector to wait for in Playwright"
     )
     headers: dict[str, str] = Field(default_factory=dict, description="Custom HTTP headers")
+    encoding: str | None = Field(
+        default=None,
+        description="Force a specific page encoding (e.g. 'shift_jis'). "
+        "If omitted, encoding is detected from the response header/meta tags.",
+    )
 
 
 class Article(BaseModel):

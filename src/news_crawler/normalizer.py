@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+import unicodedata
 from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -65,6 +66,19 @@ def normalize_url(url: str) -> str:
     return urlunparse((scheme, netloc, path, "", new_query, ""))
 
 
+def normalize_title_for_dedupe(title: str) -> str:
+    """Normalize a title for exact-match cross-source duplicate detection.
+
+    Applies NFKC normalization (full/half-width, compatibility forms) and strips
+    all whitespace, so that titles differing only in spacing or character width
+    are treated as identical.
+    """
+    if not title:
+        return ""
+    normalized = unicodedata.normalize("NFKC", title)
+    return re.sub(r"\s+", "", normalized)
+
+
 def compute_content_hash(title: str, content: str) -> str:
     """Compute SHA-256 hash of normalized title and content."""
     normalized_title = clean_text(title)
@@ -96,9 +110,22 @@ def parse_datetime(date_str: str | None) -> datetime | None:
     if not cleaned:
         return None
 
+    # Normalize Japanese date format (e.g. "2026年9月12日" -> "2026-9-12")
+    cleaned = re.sub(
+        r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+        r"\1-\2-\3",
+        cleaned,
+    )
+
     try:
         dt = date_parser.parse(cleaned)
         # If timezone-aware, keep or convert
         return dt
+    except (ValueError, TypeError, OverflowError):
+        pass
+
+    # Retry tolerating trailing/embedded non-date text (e.g. "2026/09/17 12:24更新")
+    try:
+        return date_parser.parse(cleaned, fuzzy=True)
     except (ValueError, TypeError, OverflowError):
         return None
