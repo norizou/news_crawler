@@ -14,7 +14,6 @@ tags:
   - ai-enrichment
 status: completed
 ---
-
 週1回程度のペースで効率的に最新トレンドやビジネス動向、技術動向をキャッチアップできるよう、国内外の主要なAI情報ソースから記事情報を収集し、SQLiteに保存してMarkdownレポートを生成するシステムの仕様書および実装ウォークスルーです。AIによる日本語翻訳・要約機能も搭載しています。
 
 ---
@@ -179,68 +178,105 @@ erDiagram
 
 ```text
 news_crawler/
-├── pyproject.toml              # uv パッケージ設定・CLI 定義
-├── uv.lock                     # 依存バージョン完全固定ロック
-├── package.json                # npm スクリプト・Markdown Lint 設定
-├── .markdownlint.json          # Markdown lint ルール設定
-├── .textlintrc.json            # 日本語 textlint ルール設定
-├── .textlintignore             # textlint 除外設定
-├── .gitlab-ci.yml              # GitLab CI パイプライン設定
-├── LICENSE                     # MIT License
-├── README.md                   # ユーザー向けドキュメント
-├── README.en.md                # ユーザー向けドキュメント（英語版）
-├── AGENTS.md                   # エージェント用リファレンス
-├── Idea_memo.md                # 本開発仕様書・ウォークスルー
-├── config/
-│   ├── crawler.yaml            # レート制限・タイムアウト・AI設定等のクローラー共通設定
-│   ├── sources.example.yaml    # ソース設定テンプレート
-│   └── sources.yaml            # 実運用ソース設定
-├── src/
-│   └── news_crawler/
-│       ├── __init__.py         # パッケージ初期化
-│       ├── cli.py              # Click + Rich による CLI インターフェース
-│       ├── config.py           # YAML 設定ローダーおよび Pydantic バリデーター
-│       ├── models.py           # Pydantic v2 データモデル群
-│       ├── database.py         # SQLite + FTS5 リポジトリ層
-│       ├── ai_processor.py     # AI 翻訳・要約プロセッサ（AIA Proxy連携）
-│       ├── normalizer.py       # URL 正規化・テキスト整形・ハッシュ計算
-│       ├── coordinator.py      # クロール実行コーディネーター
-│       ├── reporting.py        # Markdown レポート生成エンジン
-│       ├── utils.py            # システム CA 証明書の自動解決ユーティリティ
-│       └── adapters/           # 取得アダプター群
-│           ├── __init__.py
-│           ├── base.py         # BaseAdapter 抽象基底クラス
-│           ├── rss.py          # RSS / Atom フィード取得アダプター
-│           ├── huggingface.py  # Hugging Face Hub API 取得アダプター
-│           ├── github.py       # GitHub Releases API 取得アダプター
-│           ├── html.py         # 静的 HTML スクレイピングアダプター
-│           └── playwright.py   # ヘッドレス Chromium 動的レンダリングアダプター
-└── tests/                      # テストコード群
-    ├── fixtures/               # オフライン検証用 HTML / XML フィクスチャ
-    ├── conftest.py             # 共通テストフィクスチャ・モック
-    ├── test_adapters.py        # アダプター単体テスト
-    ├── test_ai_processor.py    # AI プロセッサ・API 単体テスト
-    ├── test_cli.py             # CLI コマンド統合テスト
-    ├── test_config.py          # 設定読み込みテスト
-    ├── test_database.py        # DB / FTS5 検索テスト
-    ├── test_normalizer.py      # 正規化テスト
-    └── test_reporting.py       # レポート生成テスト
+├──  20261008_mac-local_to_main_porting.md
+├──  AGENTS.md                   # エージェント用リファレンス
+├──  CONTRIBUTING.md             # コントリビューションガイド
+├──  Idea_memo.html
+├──  Idea_memo.md                # 本開発仕様書・ウォークスルー
+├──  LICENSE                     # MIT License
+├──  lint.sh                     # Lint 実行スクリプト
+├──  package.json                # npm スクリプト・Markdown Lint 設定
+├──  pyproject.toml              # uv パッケージ設定・CLI 定義
+├──  README.en.md                # ユーザー向けドキュメント（英語版）
+├── 󰂺 README.md                   # ユーザー向けドキュメント
+├── 󰒃 SECURITY.md                 # セキュリティポリシー
+├──  config/
+│   ├──  ai_keywords.yaml        # AI キーワード設定
+│   ├──  crawler.yaml            # レート制限・タイムアウト・AI設定等のクローラー共通設定
+│   ├──  sources.example.yaml    # ソース設定テンプレート
+│   └──  sources.yaml            # 実運用ソース設定
+├──  data/
+│   ├──  articles.db              # SQLite データベース (WAL モード)
+│   ├──  articles.db.bak-20261008
+│   └── 󰡯 articles_db
+├──  output/                      # レポート・可視化出力ディレクトリ
+│   ├──  gemini_news_summary.html
+│   ├── 󰕙 gemini_news_summary.svg
+│   ├── 󰕙 kimi_deepseek_summary.svg
+│   ├──  weekly_report_20260914.md
+│   ├──  weekly_report_20260914_assets/
+│   │   ├──  frequency_ja.png
+│   │   ├──  frequency_original.png
+│   │   ├──  wordcloud_ja.png
+│   │   └──  wordcloud_original.png
+│   ├──  weekly_report_20260915.md
+│   └──  weekly_report_20260915_assets/
+│       ├──  frequency_ja.png
+│       ├──  frequency_original.png
+│       ├──  wordcloud_ja.png
+│       └──  wordcloud_original.png
+├── 󰣞 src/
+│   └──  news_crawler/
+│       ├──  __init__.py         # パッケージ初期化
+│       ├──  ai_processor.py     # AI 翻訳・要約プロセッサ（AIA Proxy連携）
+│       ├──  cli.py              # Click + Rich による CLI インターフェース
+│       ├──  config.py           # YAML 設定ローダーおよび Pydantic バリデーター
+│       ├──  coordinator.py      # クロール実行コーディネーター
+│       ├──  database.py         # SQLite + FTS5 リポジトリ層
+│       ├──  dedupe.py           # 重複排除モジュール
+│       ├──  digest.py           # 日付別ダイジェスト生成モジュール
+│       ├──  models.py           # Pydantic v2 データモデル群
+│       ├──  normalizer.py       # URL 正規化・テキスト整形・ハッシュ計算
+│       ├──  reporting.py        # Markdown レポート生成エンジン
+│       ├──  text_analyzer.py    # テキスト分析モジュール
+│       ├──  utils.py            # システム CA 証明書の自動解決ユーティリティ
+│       ├──  visualization.py    # 可視化モジュール（ワードクラウド・頻度分析）
+│       └──  adapters/           # 取得アダプター群
+│           ├──  __init__.py
+│           ├──  base.py         # BaseAdapter 抽象基底クラス
+│           ├──  github.py       # GitHub Releases API 取得アダプター
+│           ├──  huggingface.py  # Hugging Face Hub API 取得アダプター
+│           ├──  html.py         # 静的 HTML スクレイピングアダプター
+│           ├──  playwright.py   # ヘッドレス Chromium 動的レンダリングアダプター
+│           └──  rss.py          # RSS / Atom フィード取得アダプター
+├──  tests/                      # テストコード群
+│   ├──  __pycache__/
+│   ├──  conftest.py             # 共通テストフィクスチャ・モック
+│   ├──  fixtures/               # オフライン検証用 HTML / XML フィクスチャ
+│   │   ├──  sample_article.html
+│   │   ├──  sample_list.html
+│   │   └── 󰗀 sample_rss.xml
+│   ├──  test_adapters.py        # アダプター単体テスト
+│   ├──  test_ai_processor.py    # AI プロセッサ・API 単体テスト
+│   ├──  test_cli.py             # CLI コマンド統合テスト
+│   ├──  test_config.py          # 設定読み込みテスト
+│   ├──  test_database.py        # DB / FTS5 検索テスト
+│   ├──  test_dedupe.py          # 重複排除テスト
+│   ├──  test_digest.py          # ダイジェスト生成テスト
+│   ├──  test_normalizer.py      # 正規化テスト
+│   ├──  test_reporting.py       # レポート生成テスト
+│   ├──  test_text_analyzer.py    # テキスト分析テスト
+│   └──  test_visualization.py   # 可視化テスト
+└──  uv.lock                     # 依存バージョン完全固定ロック
 ```
 
 ### 3.2 コアコンポーネントの解説
 
 #### 1. データ正規化 (`normalizer.py`)
+
 - `normalize_url(url)`: `utm_source`, `utm_medium`, `fbclid` などのマーケティング用追跡クエリを自動削除し、同一記事の URL を一意に統一します。
 - `compute_content_hash(title, content)`: タイトルと本文のテキストから SHA-256 ハッシュを計算し、内容の更新有無を検知します。
 - `clean_text(text)`: 連続する空白文字や冗長な改行を整理し、検索に適したプレーンテキストを抽出します。
 
 #### 2. SQLite リポジトリ (`database.py`)
+
 - `PRAGMA journal_mode = WAL` および `PRAGMA foreign_keys = ON` を有効化し、高速な同時読み書きと参照整合性を確保。
 - 英語の全文検索用 FTS5 仮想テーブル (`article_fts`: `unicode61`) および日本語の全文検索用 FTS5 仮想テーブル (`article_fts_ja`: `trigram`) を配備。
 - トリガー群により、記事の登録・更新・削除と同期して日英両方のインデックスを自動維持。
 - AI 処理ステータス（`pending`, `completed`, `failed`）、入力ハッシュ、モデル名、プロンプト版の柔軟な状態管理と後方互換スキーマ移行を提供。
 
 #### 3. AI 翻訳・要約プロセッサ (`ai_processor.py`)
+
 - **原文保存後の処理**: スクレイピング完了後に別フェーズ（`news-crawler enrich`）として実行。AI障害が発生しても収集済み原文を失わない安全設計。
 - **シングルリクエスト処理**: 1回の API コールで日本語タイトルと日本語要約（2〜3文）を同時生成。
 - **差分処理 & 冪等性**: 本文・タイトルのハッシュ値に基づき、新規・更新記事のみを対象として重複 API 呼び出しを防止。
@@ -248,13 +284,15 @@ news_crawler/
 - **オフライン検索・レポート**: AI 結果を DB に保存するため、オフライン環境でも日本語キーワード検索および日本語レポート生成が可能。未処理時は原文にフォールバック。
 
 #### 4. 取得アダプター群 (`adapters/`)
-- **`RSSAdapter`**: `httpx` で非同期取得後、`feedparser` でパース。最も高速かつ安定して記事メタデータを取得。
-- **`HuggingFaceAdapter`**: Hugging Face Hub公開APIの `author` 検索から最新20モデルを取得し、モデルID、作成日時、タグ、パイプライン、ライブラリー、いいね数、ダウンロード数を `Article` に変換。
-- **`GitHubAdapter`**: GitHub Releases API用。対象リポジトリにReleaseがない場合は空になるため、中華系モデルの現行ソースには使用しない。
-- **`HTMLAdapter`**: 一覧ページからセレクターまたは `<article>` タグで記事リンクを収集し、各記事ページを取得。
-- **`PlaywrightAdapter`**: SPA サイト向けに Chromium をヘッドレス起動し、`domcontentloaded` および指定セレクターの出現を待機して DOM を抽出。
+
+- `RSSAdapter`: `httpx` で非同期取得後、`feedparser` でパース。最も高速かつ安定して記事メタデータを取得。
+- `HuggingFaceAdapter`: Hugging Face Hub公開APIの `author` 検索から最新20モデルを取得し、モデルID、作成日時、タグ、パイプライン、ライブラリー、いいね数、ダウンロード数を `Article` に変換。
+- `GitHubAdapter`: GitHub Releases API用。対象リポジトリにReleaseがない場合は空になるため、中華系モデルの現行ソースには使用しない。
+- `HTMLAdapter`: 一覧ページからセレクターまたは `<article>` タグで記事リンクを収集し、各記事ページを取得。
+- `PlaywrightAdapter`: SPA サイト向けに Chromium をヘッドレス起動し、`domcontentloaded` および指定セレクターの出現を待機して DOM を抽出。
 
 #### 5. WSL 環境の証明書の自動解決 (`utils.py`)
+
 - 社内プロキシや自己署名の証明書が存在する WSL 環境において、`/etc/ssl/certs/ca-certificates.crt` を自動検出し、`httpx` の `SSLContext` に設定。環境変数を手動設定せずとも即座に HTTPS 通信が可能。
 
 ---
@@ -263,22 +301,22 @@ news_crawler/
 
 ### 4.1 MVP 実装対象（初期5サイト）
 
-| No | ソース名 | カテゴリ | 取得方式 | 対象URL / Feed URL | 状態 |
-| --- | --- | --- | --- | --- | --- |
-| 1 | OpenAI News | official | RSS | `https://openai.com/news/rss.xml` | 稼働中 (1,100+件) |
-| 2 | Google DeepMind Blog | official | RSS | `https://deepmind.google/blog/rss.xml` | 稼働中 (100件) |
-| 3 | Hugging Face Blog | oss | RSS | `https://huggingface.co/blog/feed.xml` | 稼働中 (860+件) |
-| 4 | TechCrunch AI | media | RSS | `https://techcrunch.com/category/artificial-intelligence/feed/` | 稼働中 (19件) |
-| 5 | Ledge.ai | domestic | HTML | `https://ledge.ai/` (`a[href*='/articles/']`) | 稼働中 (20件) |
+| No | ソース名             | カテゴリ | 取得方式 | 対象URL / Feed URL                                                | 状態              |
+| -- | -------------------- | -------- | -------- | ----------------------------------------------------------------- | ----------------- |
+| 1  | OpenAI News          | official | RSS      | `https://openai.com/news/rss.xml`                               | 稼働中 (1,100+件) |
+| 2  | Google DeepMind Blog | official | RSS      | `https://deepmind.google/blog/rss.xml`                          | 稼働中 (100件)    |
+| 3  | Hugging Face Blog    | oss      | RSS      | `https://huggingface.co/blog/feed.xml`                          | 稼働中 (860+件)   |
+| 4  | TechCrunch AI        | media    | RSS      | `https://techcrunch.com/category/artificial-intelligence/feed/` | 稼働中 (19件)     |
+| 5  | Ledge.ai             | domestic | HTML     | `https://ledge.ai/` (`a[href*='/articles/']`)                 | 稼働中 (20件)     |
 
 ### 4.2 中華系モデル情報の検証ソース
 
-| ソース名 | カテゴリ | 取得方式 | 対象 | 状態 |
-| --- | --- | --- | --- | --- |
-| DeepSeek (Hugging Face) | chinese_official | Hugging Face API | `deepseek-ai` の最新20モデル | 稼働中 |
-| Qwen (Hugging Face) | chinese_official | Hugging Face API | `Qwen` の最新20モデル | 稼働中 |
-| Qwen Blog | chinese_official | 静的HTML | `https://qwenlm.github.io/` | 稼働中 |
-| THUDM (Hugging Face) | chinese_official | Hugging Face API | `THUDM` | 公開APIが空のため無効 |
+| ソース名                | カテゴリ         | 取得方式         | 対象                           | 状態                  |
+| ----------------------- | ---------------- | ---------------- | ------------------------------ | --------------------- |
+| DeepSeek (Hugging Face) | chinese_official | Hugging Face API | `deepseek-ai` の最新20モデル | 稼働中                |
+| Qwen (Hugging Face)     | chinese_official | Hugging Face API | `Qwen` の最新20モデル        | 稼働中                |
+| Qwen Blog               | chinese_official | 静的HTML         | `https://qwenlm.github.io/`  | 稼働中                |
+| THUDM (Hugging Face)    | chinese_official | Hugging Face API | `THUDM`                      | 公開APIが空のため無効 |
 
 Hugging Faceから取得する情報は、各提供元アカウントが公開したモデルのメタデータです。企業公式サイトのニュースリリースを代替する一次情報として参考にできますが、製品発表や利用条件の正式な確認には提供元の公式文書も参照します。
 
@@ -290,20 +328,20 @@ Hugging Faceから取得する情報は、各提供元アカウントが公開�
 
 以下のサイトはアクセス制限、RSSフィードの不在、またはSSL証明書エラーにより無効化されています。将来アクセス可能になった場合は有効化できます。
 
-| ソース名 | カテゴリ | 取得方式 | URL | 無効理由 |
-| --- | --- | --- | --- | --- |
-| VentureBeat (AI) | media | RSS | `https://venturebeat.com/category/ai/` | 429 Too Many Requests |
-| Wired (AI) | media | RSS | `https://www.wired.com/tag/artificial-intelligence/` | 404 Not Found |
-| The Verge (AI) | media | RSS | `https://www.theverge.com/ai-artificial-intelligence` | 404 Not Found |
-| ITmedia AI+ | domestic | RSS | `https://www.itmedia.co.jp/aiplus/` | RSSリストページのみ、カテゴリ別RSSなし |
-| AI Market | domestic | RSS | `https://ai-market.jp/category/news/` | 404 Not Found |
-| AI総研 | domestic | RSS | `https://metaversesouken.com/ai/generative_ai/media/` | SSL証明書エラー |
-| ZDNET Japan (AI) | domestic | RSS | `https://japan.zdnet.com/topic/ai/` | 404 Not Found |
-| The Rundown AI | newsletter | RSS | `https://www.therundown.ai/` | 404 Not Found |
-| The Batch (DeepLearning.AI) | newsletter | RSS | `https://www.deeplearning.ai/the-batch/` | 404 Not Found |
-| TLDR AI | newsletter | RSS | `https://tldr.tech/ai/` | 404 Not Found |
-| Anthropic (Hugging Face) | official | Hugging Face API | `https://huggingface.co/anthropic` | 空アカウント |
-| THUDM (Hugging Face) | chinese_official | Hugging Face API | `https://huggingface.co/THUDM` | 空アカウント |
+| ソース名                    | カテゴリ         | 取得方式         | URL                                                     | 無効理由                               |
+| --------------------------- | ---------------- | ---------------- | ------------------------------------------------------- | -------------------------------------- |
+| VentureBeat (AI)            | media            | RSS              | `https://venturebeat.com/category/ai/`                | 429 Too Many Requests                  |
+| Wired (AI)                  | media            | RSS              | `https://www.wired.com/tag/artificial-intelligence/`  | 404 Not Found                          |
+| The Verge (AI)              | media            | RSS              | `https://www.theverge.com/ai-artificial-intelligence` | 404 Not Found                          |
+| ITmedia AI+                 | domestic         | RSS              | `https://www.itmedia.co.jp/aiplus/`                   | RSSリストページのみ、カテゴリ別RSSなし |
+| AI Market                   | domestic         | RSS              | `https://ai-market.jp/category/news/`                 | 404 Not Found                          |
+| AI総研                      | domestic         | RSS              | `https://metaversesouken.com/ai/generative_ai/media/` | SSL証明書エラー                        |
+| ZDNET Japan (AI)            | domestic         | RSS              | `https://japan.zdnet.com/topic/ai/`                   | 404 Not Found                          |
+| The Rundown AI              | newsletter       | RSS              | `https://www.therundown.ai/`                          | 404 Not Found                          |
+| The Batch (DeepLearning.AI) | newsletter       | RSS              | `https://www.deeplearning.ai/the-batch/`              | 404 Not Found                          |
+| TLDR AI                     | newsletter       | RSS              | `https://tldr.tech/ai/`                               | 404 Not Found                          |
+| Anthropic (Hugging Face)    | official         | Hugging Face API | `https://huggingface.co/anthropic`                    | 空アカウント                           |
+| THUDM (Hugging Face)        | chinese_official | Hugging Face API | `https://huggingface.co/THUDM`                        | 空アカウント                           |
 
 ---
 
@@ -467,15 +505,15 @@ sources:
 
 テストは外部サービスの可用性と単体機能を分離します。通常の `pytest` では実サイトへ接続せず、固定レスポンスと一時SQLiteを使用して、高速かつ再現可能に検証します。
 
-| 対象 | テスト方式 | 主な検証内容 |
-| --- | --- | --- |
-| RSSアダプター | XMLフィクスチャ + `respx` | 記事数、タイトル、URL正規化、概要、日時、著者 |
-| HTMLアダプター | HTMLフィクスチャ + `respx` | 一覧リンク抽出、本文抽出、404時の継続、日時、著者 |
-| Hugging Faceアダプター | JSON固定応答 + `respx` | APIクエリ、モデル変換、統計値、タグ、日時、ハッシュ |
-| AIプロセッサ | 固定JSON + `respx` + モック待機 | プロンプト構築、JSON抽出、指数バックオフ、429待機、冪等性 |
-| 設定ローダー | 一時YAML | `huggingface`・AI設定の型変換、環境変数上書き |
-| SQLite / FTS5 | 一時DB | 新規・更新・重複判定、英語と日本語の全文検索、AI状態管理 |
-| CLI / レポート | 一時DBと出力先 | `crawl`・`enrich`・`search`・`stats`・Markdown出力 |
+| 対象                   | テスト方式                       | 主な検証内容                                               |
+| ---------------------- | -------------------------------- | ---------------------------------------------------------- |
+| RSSアダプター          | XMLフィクスチャ +`respx`       | 記事数、タイトル、URL正規化、概要、日時、著者              |
+| HTMLアダプター         | HTMLフィクスチャ +`respx`      | 一覧リンク抽出、本文抽出、404時の継続、日時、著者          |
+| Hugging Faceアダプター | JSON固定応答 +`respx`          | APIクエリ、モデル変換、統計値、タグ、日時、ハッシュ        |
+| AIプロセッサ           | 固定JSON +`respx` + モック待機 | プロンプト構築、JSON抽出、指数バックオフ、429待機、冪等性  |
+| 設定ローダー           | 一時YAML                         | `huggingface`・AI設定の型変換、環境変数上書き            |
+| SQLite / FTS5          | 一時DB                           | 新規・更新・重複判定、英語と日本語の全文検索、AI状態管理   |
+| CLI / レポート         | 一時DBと出力先                   | `crawl`・`enrich`・`search`・`stats`・Markdown出力 |
 
 Hugging Faceアダプターのテストでは、`modelId` がない不正な要素をスキップしながら、正常なモデルを失わないことも確認します。実APIの疎通、社内ネットワークからの到達性、レスポンス仕様の変化は、次のdry-runを手動または定期的な疎通ジョブで確認します。
 
