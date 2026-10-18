@@ -1,5 +1,6 @@
 """RSS/Atom feed fetch adapter."""
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -14,7 +15,16 @@ from news_crawler.utils import get_ssl_verify
 
 
 class RSSAdapter(BaseAdapter):
-    """Adapter for RSS and Atom feeds."""
+    """Adapter for RSS and Atom feeds.
+
+    With ``source.fulltext_selector`` set, entry pages are fetched to replace the
+    (often truncated) feed excerpt with the article body. URLs in
+    ``skip_fulltext_urls`` (normalized) are not fetched again.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.skip_fulltext_urls: set[str] = set()
 
     async def fetch(self) -> list[Article]:
         """Fetch and parse feed entries."""
@@ -33,6 +43,41 @@ class RSSAdapter(BaseAdapter):
             response = await client.get(target_url)
             response.raise_for_status()
             feed_content = response.text
+            fetched_articles = self._parse_feed(feed_content)
+            if self.source.fulltext_selector:
+                # Drop articles whose full text is already stored: re-emitting them with
+                # the feed excerpt would overwrite the stored body on upsert.
+                fetched_articles = [
+                    a for a in fetched_articles if a.normalized_url not in self.skip_fulltext_urls
+                ]
+                await self._fill_fulltext(client, fetched_articles)
+        return fetched_articles
+
+    async def _fill_fulltext(self, client: httpx.AsyncClient, articles: list[Article]) -> None:
+        """Replace feed excerpts with page body text; keep the excerpt on any failure."""
+        for art in articles:
+            if self.crawler_config.download_delay > 0:
+                await asyncio.sleep(self.crawler_config.download_delay)
+            try:
+                resp = await client.get(art.url)
+                if resp.status_code != 200:
+                    continue
+                body = self._extract_fulltext(resp.content)
+            except Exception:
+                continue
+            # Only adopt a body that is longer than the excerpt it replaces
+            if body and len(body) > len(art.content):
+                art.content = body
+                art.content_hash = compute_content_hash(art.title, body)
+
+    def _extract_fulltext(self, html: bytes) -> str:
+        soup = BeautifulSoup(html, "html.parser", from_encoding=self.source.encoding)
+        el = soup.select_one(self.source.fulltext_selector or "")
+        if el is None:
+            return ""
+        return clean_text(el.get_text(separator="\n", strip=True))
+
+    def _parse_feed(self, feed_content: str) -> list[Article]:
 
         # Parse with feedparser
         feed: Any = feedparser.parse(feed_content)

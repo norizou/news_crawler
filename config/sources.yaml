@@ -27,6 +27,7 @@ sources:
     enabled: true
     base_url: "https://www.nikkansports.com/keiba/"
     feed_url: "https://www.nikkansports.com/keiba/atom.xml"
+    fulltext_selector: ".article-body"  # Atom は ~120文字の抜粋のみ。記事ページから本文を補完（2026/10/17）
     list_url: "https://www.nikkansports.com/keiba/"
 
   google_news_keiba:

@@ -278,6 +278,18 @@ class Database:
                 },
             )
 
+    def get_fulltext_urls(self, source_key: str) -> set[str]:
+        """Normalized URLs of a source whose stored body differs from the feed excerpt.
+
+        Used to skip re-fetching article pages whose full text was already stored.
+        """
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT normalized_url FROM articles WHERE source_key = ? AND content <> summary",
+                (source_key,),
+            ).fetchall()
+        return {r[0] for r in rows}
+
     def upsert_article(self, article: Article) -> tuple[Article, bool, bool]:
         """
         Insert or update an article.
@@ -637,6 +649,53 @@ class Database:
             cur = conn.execute(query, params)
             rows = cur.fetchall()
             return [self._row_to_article(row) for row in rows]
+
+    def count_enrich_candidates(
+        self,
+        days: int = 7,
+        retry_failed: bool = False,
+        prompt_version: str | None = None,
+    ) -> dict[str, int]:
+        """Breakdown of enrichment candidates for the 'nothing to do' message.
+
+        Uses the same status/window predicates as :meth:`get_pending_articles`,
+        split into eligible rows, rows excluded as duplicates, and rows that
+        match the status filter but fall outside the period.
+        """
+        cutoff_iso = (datetime.now() - timedelta(days=days)).isoformat()
+
+        status_conditions = ["ai_status = 'pending'"]
+        if retry_failed:
+            status_conditions.append("ai_status = 'failed'")
+        if prompt_version is not None:
+            status_conditions.append(
+                "(ai_status = 'completed' AND COALESCE(ai_prompt_version, '1') != ?)"
+            )
+
+        in_window = "(published_at >= ? OR (published_at IS NULL AND fetched_at >= ?))"
+        query = f"""
+            SELECT
+                SUM(CASE WHEN {in_window} AND duplicate_of_id IS NULL
+                         THEN 1 ELSE 0 END) AS eligible,
+                SUM(CASE WHEN {in_window} AND duplicate_of_id IS NOT NULL
+                         THEN 1 ELSE 0 END) AS excluded_duplicates,
+                SUM(CASE WHEN NOT {in_window}
+                         THEN 1 ELSE 0 END) AS outside_window
+            FROM articles
+            WHERE ({" OR ".join(status_conditions)})
+        """
+        # CASE expressions come before the WHERE clause's prompt_version param.
+        params: list[Any] = [cutoff_iso] * 6
+        if prompt_version is not None:
+            params.append(prompt_version)
+
+        with self.connection() as conn:
+            row = conn.execute(query, params).fetchone()
+            return {
+                "eligible": row["eligible"] or 0,
+                "excluded_duplicates": row["excluded_duplicates"] or 0,
+                "outside_window": row["outside_window"] or 0,
+            }
 
     def save_ai_result(
         self,

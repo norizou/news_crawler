@@ -8,6 +8,7 @@ import csv
 import io
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -53,7 +54,17 @@ EXCLUDE_TITLE_WORDS = [
     "優駿",
     "引退式",
     "テレビ・ラジオ中継",
+    "頭が登録",
+    "登録馬",
+    "出走馬",
+    "枠順",
 ]
+
+# JRA-style race header at the top of an article body, e.g.
+# "(富士ステークス、2026年10月17日、GII、東京11R、芝・左1600m)"
+RACE_HEADER_DATE_REGEX = re.compile(
+    rf"[（(][^()（）]*?、(\d{{4}})年(\d{{1,2}})月(\d{{1,2}})日、[^()（）]*?(?:{VENUE_PATTERN})\s*\d+\s*[rR]"
+)
 
 
 @dataclass
@@ -169,13 +180,26 @@ def extract_schedule_map(db: Database, target_date: str) -> dict[str, tuple[int,
     return schedule_map
 
 
+def _header_race_date(norm_content: str) -> str | None:
+    """Return the race date (YYYY-MM-DD) in the article's race header, if any."""
+    m = RACE_HEADER_DATE_REGEX.search(norm_content[:300])
+    if not m:
+        return None
+    return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+
+
 def parse_race_metadata(
     title: str,
     content: str | None,
+    target_date: str | None = None,
 ) -> tuple[str, int, str] | None:
     """
     Parse (venue, race_num, race_name) from article title and content.
     Returns None if article is not race-specific or is a general preview/column.
+
+    When ``target_date`` (YYYY-MM-DD) is given, an article whose body header
+    names a different race date (e.g. a registration notice for next
+    Saturday's race, published on Monday) is rejected.
     """
     norm_title = unicodedata.normalize("NFKC", title)
     norm_content = unicodedata.normalize("NFKC", content) if content else ""
@@ -183,6 +207,11 @@ def parse_race_metadata(
     lower_title = norm_title.lower()
     for ex in EXCLUDE_TITLE_WORDS:
         if ex in lower_title:
+            return None
+
+    if target_date:
+        header_date = _header_race_date(norm_content)
+        if header_date and header_date != target_date:
             return None
 
     venue: str | None = None
@@ -306,7 +335,7 @@ class TargetCommentExporter:
         race_groups: dict[tuple[str, int], list[tuple[Article, str]]] = {}
 
         for art in articles:
-            res = parse_race_metadata(art.title, art.content)
+            res = parse_race_metadata(art.title, art.content, target_date)
             if not res:
                 continue
 
@@ -341,13 +370,11 @@ class TargetCommentExporter:
             race_id = build_target_race_id(target_date, v, kai, nichi, r_num)
 
             # Determine best race name
-            best_race_name = ""
-            for _, r_name in art_list:
-                if r_name and r_name != f"{v}{r_num}R":
-                    best_race_name = r_name
-                    break
-            if not best_race_name:
-                best_race_name = f"{v}{r_num}R"
+            # Majority vote among articles; ties go to the earliest article.
+            name_counts = Counter(
+                r_name for _, r_name in art_list if r_name and r_name != f"{v}{r_num}R"
+            )
+            best_race_name = name_counts.most_common(1)[0][0] if name_counts else f"{v}{r_num}R"
 
             # Assemble consolidated comment text
             # Prioritize Radio NIKKEI as it has complete horse-by-horse comments

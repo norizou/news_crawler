@@ -196,7 +196,7 @@ def test_cli_export_comments(tmp_path: Path):
 crawler:
   download_delay: 0.0
   database_path: "{db_path}"
-  output_dir: "{tmp_path / 'output'}"
+  output_dir: "{tmp_path / "output"}"
 """,
         encoding="utf-8",
     )
@@ -264,3 +264,97 @@ def test_parse_race_metadata_does_not_match_stray_v():
     # "TV" / "Vol" must not be mistaken for a "V" (win) marker
     assert parse_race_metadata("中山11R TV中継のお知らせ Vol.3", "中山11Rの案内") is None
     assert parse_race_metadata("【中山4R・2歳新馬】マートングレイスが初陣V", "") is not None
+
+
+REGISTRATION_BODY = (
+    "マイラーズC1着以来の出走となるアドマイヤズーム(撮影・根本成)\n"
+    "(富士ステークス、2026年10月17日、GII、東京11R、芝・左1600m)\n"
+    "10月17日(土)に東京競馬場で行われる第29回富士ステークス(1着賞金5900万円)の登録馬が発表された。"
+)
+
+
+def test_parse_race_metadata_rejects_registration_notice_for_other_date():
+    """10/12 に出た 10/17 富士S の登録記事を、10/12 の東京11R として拾わない。"""
+    title = "【富士S】アドマイヤズーム、トロヴァトーレなど14頭が登録"
+    assert parse_race_metadata(title, REGISTRATION_BODY) is None  # 題名語で除外
+    # 題名語に引っかからなくても、本文ヘッダの開催日が違えば除外
+    assert parse_race_metadata("【富士S】発表", REGISTRATION_BODY, "2026-10-12") is None
+    # 開催日が一致すれば通す
+    assert parse_race_metadata("【富士S】発表", REGISTRATION_BODY, "2026-10-17") == (
+        "東京",
+        11,
+        "富士S",
+    )
+    # target_date 未指定なら従来どおり
+    assert parse_race_metadata("【富士S】発表", REGISTRATION_BODY) is not None
+
+
+def _add_article(db: Database, key: str, url: str, title: str, content: str, at: datetime) -> None:
+    db.upsert_article(
+        Article(
+            source_key=key,
+            url=url,
+            normalized_url=url,
+            title=title,
+            content=content,
+            published_at=at,
+            category="media",
+        )
+    )
+
+
+def test_exporter_race_name_not_polluted_by_other_date_article(tmp_path: Path):
+    """回帰: 10/12 東京11R が『富士S』と誤ラベルされた件（オクトーバーSが正）。"""
+    db = Database(tmp_path / "t.db")
+    _init_sources(db)
+    # 先に入る誤記事（別開催日=10/17 の登録発表。題名語では除外されない形）
+    _add_article(
+        db,
+        "jra",
+        "https://jra.go.jp/a1",
+        "【富士S】発表 東京11R 勝利",
+        REGISTRATION_BODY,
+        datetime(2026, 10, 12, 17, 3),
+    )
+    for i in range(2):
+        _add_article(
+            db,
+            "radionikkei",
+            f"https://radionikkei.jp/o{i}",
+            f"【東京11R・オクトーバーS】アスクセクシーモアが勝利した{i}",
+            "東京11Rのオクトーバーステークス 1着 アスクセクシーモア 「さばける脚」",
+            datetime(2026, 10, 12, 16, 0),
+        )
+    items = TargetCommentExporter(db).extract_race_comments(
+        "2026-10-12", manual_kai=4, manual_nichi=5
+    )
+    tokyo11 = [i for i in items if i.venue == "東京" and i.race_num == 11]
+    assert [i.race_name for i in tokyo11] == ["オクトーバーS"]
+    assert "富士" not in tokyo11[0].comment_text
+
+
+def test_exporter_race_name_majority_vote(tmp_path: Path):
+    """同一レースで題名の別名が割れたら多数決（先頭記事の偶然に左右されない）。"""
+    db = Database(tmp_path / "t.db")
+    _init_sources(db)
+    _add_article(
+        db,
+        "jra",
+        "https://jra.go.jp/b1",
+        "【Ｘ特別】東京11R 勝利",
+        "東京11R",
+        datetime(2026, 10, 12, 17, 0),
+    )
+    for i in range(2):
+        _add_article(
+            db,
+            "radionikkei",
+            f"https://radionikkei.jp/m{i}",
+            f"【東京11R・オクトーバーS】勝利した{i}",
+            "東京11R 1着 A",
+            datetime(2026, 10, 12, 16, 0),
+        )
+    items = TargetCommentExporter(db).extract_race_comments(
+        "2026-10-12", manual_kai=4, manual_nichi=5
+    )
+    assert [i.race_name for i in items] == ["オクトーバーS"]

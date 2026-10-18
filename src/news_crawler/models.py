@@ -57,6 +57,12 @@ class SourceConfig(BaseModel):
     )
     title_selector: str | None = Field(default=None, description="CSS selector for title")
     content_selector: str | None = Field(default=None, description="CSS selector for body")
+    fulltext_selector: str | None = Field(
+        default=None,
+        description="RSS sources only: CSS selector for the article body. When set, each "
+        "entry's page is fetched to replace the feed excerpt with the full text "
+        "(falls back to the excerpt if the fetch or selector fails).",
+    )
     summary_selector: str | None = Field(default=None, description="CSS selector for summary")
     date_selector: str | None = Field(default=None, description="CSS selector for pub date")
     author_selector: str | None = Field(default=None, description="CSS selector for author")

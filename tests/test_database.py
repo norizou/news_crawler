@@ -622,3 +622,38 @@ def test_stats_with_ai_status(temp_db: Database, sample_source: SourceConfig):
     # AI status section may not exist if no articles have AI fields yet
     # Just verify stats command works and returns article count
     assert stats["total_articles"] == 3
+
+
+def test_get_fulltext_urls(tmp_path):
+    """本文が抜粋と異なる（=全文取得済み）記事のURLだけ返す。"""
+    from news_crawler.database import Database
+    from news_crawler.models import Article, FetchMethod, SourceConfig
+
+    db = Database(tmp_path / "t.db")
+    db.upsert_source(
+        SourceConfig(
+            key="n", name="n", category="c", fetch_method=FetchMethod.RSS, base_url="https://e.com"
+        )
+    )
+    db.upsert_article(
+        Article(
+            source_key="n",
+            url="https://e.com/a",
+            normalized_url="https://e.com/a",
+            title="a",
+            summary="抜粋…",
+            content="抜粋…",
+        )
+    )
+    db.upsert_article(
+        Article(
+            source_key="n",
+            url="https://e.com/b",
+            normalized_url="https://e.com/b",
+            title="b",
+            summary="抜粋…",
+            content="本文全体",
+        )
+    )
+    assert db.get_fulltext_urls("n") == {"https://e.com/b"}
+    assert db.get_fulltext_urls("other") == set()

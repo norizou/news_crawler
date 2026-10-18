@@ -38,6 +38,10 @@ MECAB_COLS = 13
 DEFAULT_POS = ("名詞", "固有名詞", "一般", "*", "*", "*")
 DEFAULT_COST = "3000"
 
+# アカウント全体から参照する共有 config (~/.virtualenvs 方式の Node/Python 一元管理と同思想)。
+# 絶対パスで書くため、どの cwd のプロジェクトからでも Dictionary(config_path=...) で読める。
+GLOBAL_SUDACHI_JSON = Path.home() / ".local" / "share" / "sudachi" / "sudachi.json"
+
 PCKEIBA_CATEGORIES = ("horses", "jockeys", "races", "trainers", "owners")
 DEFAULT_PCKEIBA_CATEGORIES = ("jockeys", "races", "trainers", "owners")
 PCKEIBA_QUERIES = {
@@ -297,6 +301,9 @@ def main() -> None:
     dic_paths = build(rows, Path(args.out_dir), args.stem, system_dic_path())
     if not args.no_config_update:
         update_sudachi_json(Path(args.config), dic_paths)
+        abs_dics = [str(Path(p).resolve()) for p in dic_paths]
+        GLOBAL_SUDACHI_JSON.parent.mkdir(parents=True, exist_ok=True)
+        update_sudachi_json(GLOBAL_SUDACHI_JSON, abs_dics)
     print(f"合計 {len(rows)} エントリ / {len(dic_paths)} 辞書")
 
 

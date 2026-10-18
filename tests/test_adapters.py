@@ -174,3 +174,77 @@ async def test_huggingface_adapter():
     assert articles[0].tags == ["transformers", "license:mit"]
     assert articles[0].published_at is not None
     assert articles[0].content_hash
+
+
+NIKKAN_ATOM = """<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title>
+<entry><title>コンピ分析【富士Ｓ】</title><link href="https://example.com/n/1.html"/>
+<id>1</id><updated>2026-10-16T20:02:02+09:00</updated>
+<summary>コンピ分析 富士Ｓ 先週は…</summary></entry>
+<entry><title>別記事</title><link href="https://example.com/n/2.html"/>
+<id>2</id><updated>2026-10-16T19:00:00+09:00</updated><summary>抜粋2…</summary></entry>
+</feed>"""
+NIKKAN_PAGE = (
+    "<html><body><div class='nav'>メニュー</div>"
+    "<div class='article-body'><p>コンピ分析 富士Ｓ 先週は…</p>"
+    "<p>本命は◎アンパドゥ。続きの本文がここにある。</p></div>"
+    "</body></html>"
+)
+
+
+def _fulltext_source() -> SourceConfig:
+    return SourceConfig(
+        key="nikkan",
+        name="Nikkan",
+        category="sports_paper",
+        fetch_method=FetchMethod.RSS,
+        base_url="https://example.com",
+        feed_url="https://example.com/atom.xml",
+        fulltext_selector=".article-body",
+    )
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rss_fulltext_replaces_excerpt_and_falls_back():
+    respx.get("https://example.com/atom.xml").mock(
+        return_value=httpx.Response(200, text=NIKKAN_ATOM)
+    )
+    respx.get("https://example.com/n/1.html").mock(
+        return_value=httpx.Response(200, text=NIKKAN_PAGE)
+    )
+    respx.get("https://example.com/n/2.html").mock(return_value=httpx.Response(404))
+
+    arts = await RSSAdapter(_fulltext_source(), CrawlerConfig(download_delay=0.0)).fetch()
+
+    by_url = {a.url: a for a in arts}
+    full = by_url["https://example.com/n/1.html"]
+    assert "本命は◎アンパドゥ" in full.content and "メニュー" not in full.content
+    assert full.summary.startswith("コンピ分析")  # 抜粋は summary に残る
+    assert full.content_hash  # 本文で再計算
+    # 取得失敗は抜粋のまま（記事は落とさない）
+    assert by_url["https://example.com/n/2.html"].content == "抜粋2…"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rss_fulltext_skips_known_urls_and_missing_selector():
+    respx.get("https://example.com/atom.xml").mock(
+        return_value=httpx.Response(200, text=NIKKAN_ATOM)
+    )
+    page1 = respx.get("https://example.com/n/1.html").mock(
+        return_value=httpx.Response(200, text=NIKKAN_PAGE)
+    )
+    page2 = respx.get("https://example.com/n/2.html").mock(
+        return_value=httpx.Response(200, text="<html><body>セレクタ無し</body></html>")
+    )
+    adapter = RSSAdapter(_fulltext_source(), CrawlerConfig(download_delay=0.0))
+    adapter.skip_fulltext_urls = {"https://example.com/n/1.html"}
+    arts = await adapter.fetch()
+
+    assert not page1.called  # 取得済みは再取得しない
+    assert "https://example.com/n/1.html" not in {a.url for a in arts}  # 抜粋での上書きを防ぐ
+    assert page2.called
+    assert {a.url: a.content for a in arts}[
+        "https://example.com/n/2.html"
+    ] == "抜粋2…"  # セレクタ不一致→抜粋

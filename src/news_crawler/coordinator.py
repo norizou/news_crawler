@@ -55,6 +55,8 @@ class CrawlCoordinator:
 
         try:
             adapter = self._get_adapter(source)
+            if isinstance(adapter, RSSAdapter) and source.fulltext_selector:
+                adapter.skip_fulltext_urls = self.db.get_fulltext_urls(source.key)
             articles = await adapter.fetch()
 
             new_count = 0
