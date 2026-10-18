@@ -66,7 +66,7 @@ def test_generate_markdown_report_custom_title_and_tags(tmp_path: Path):
     assert "title: 競馬ニュース動向レポート [days]" in md
     assert "tags:\n- keiba\n- weekly\n- report" in md
     # Make sure pie charts and assets dir are not created when visualize=False
-    assert not (tmp_path / "keiba_report_assets").exists()
+    assert not (tmp_path / "svg").exists()
 
 
 def test_resolve_report_period():
@@ -164,15 +164,12 @@ stopwords_general:
     )
 
     assert "## 📈 単語頻度分析" in md
-    assert "### 日本語ワードクラウド" in md
-    assert "![日本語ワードクラウド](report_assets/wordcloud_ja.png)" in md
-    assert "### 原文ワードクラウド" in md
+    assert "![ワードクラウド](svg/report_wordcloud.svg)" in md
 
-    # Check assets directory
-    assets_dir = tmp_path / "report_assets"
-    assert assets_dir.exists()
-    assert (assets_dir / "wordcloud_ja.png").exists()
-    assert (assets_dir / "wordcloud_original.png").exists()
+    # Check svg directory
+    svg_dir = tmp_path / "svg"
+    assert svg_dir.exists()
+    assert (svg_dir / "report_wordcloud.svg").exists()
 
     # Check Frontmatter
     import yaml

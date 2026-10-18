@@ -190,7 +190,11 @@ sources:
     assert res.exit_code == 0
 
     today_str = datetime.now().strftime("%Y%m%d")
-    output_path = Path(app_config.crawler.output_dir) / f"weekly_report_{today_str}.md"
+    output_path = (
+        Path(app_config.crawler.output_dir)
+        / f"{datetime.now().year}"
+        / f"weekly_report_{today_str}.md"
+    )
     content = output_path.read_text(encoding="utf-8")
     assert "Kept Article" in content
     assert "Stale Google News Article" not in content
@@ -202,6 +206,66 @@ def test_cli_enrich_disabled(cli_config_dir: Path):
     res = runner.invoke(main, ["enrich", "--config-dir", str(cli_config_dir)])
     assert res.exit_code == 0
     assert "AI enrichment is disabled" in res.output
+
+
+def test_cli_enrich_no_eligible_articles(cli_config_dir: Path, tmp_path: Path):
+    """When every pending article is excluded as a duplicate, enrich must say
+    'No eligible articles' instead of a misleading 'LLM endpoint: None'."""
+    from datetime import datetime
+
+    from news_crawler.config import load_config
+    from news_crawler.database import Database
+    from news_crawler.models import Article, FetchMethod, SourceConfig
+
+    (cli_config_dir / "crawler.yaml").write_text(
+        f"""
+crawler:
+  download_delay: 0.0
+  database_path: "{tmp_path / 'cli_test.db'}"
+  output_dir: "{tmp_path / 'output'}"
+
+ai:
+  enabled: true
+""",
+        encoding="utf-8",
+    )
+
+    app_config = load_config(cli_config_dir)
+    db = Database(app_config.crawler.database_path)
+    db.upsert_source(SourceConfig(
+        key="sample_rss", name="Sample RSS", category="official",
+        fetch_method=FetchMethod.RSS, base_url="https://example.com",
+    ))
+    canonical, _, _ = db.upsert_article(Article(
+        source_key="sample_rss",
+        url="https://example.com/canonical",
+        normalized_url="https://example.com/canonical",
+        title="Canonical Article",
+        published_at=datetime.now(),
+        category="official",
+    ))
+    dup, _, _ = db.upsert_article(Article(
+        source_key="sample_rss",
+        url="https://example.com/dup",
+        normalized_url="https://example.com/dup",
+        title="Duplicate Article",
+        published_at=datetime.now(),
+        category="official",
+    ))
+    db.mark_duplicate(dup.id, canonical.id, 1.0)
+    # Keep the canonical article out of the way (completed, not pending).
+    with db.connection() as conn:
+        conn.execute(
+            "UPDATE articles SET ai_status = 'completed' WHERE id = ?",
+            (canonical.id,),
+        )
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["enrich", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+    assert "No eligible articles" in res.output
+    assert "excluded duplicates: 1" in res.output
+    assert "LLM endpoint" not in res.output
 
 
 def test_cli_stats_with_ai_status(cli_config_dir: Path):
@@ -266,3 +330,51 @@ sources:
     # Ensure pie charts are not generated
     assert "![日本語単語頻度パイチャート]" not in content
     assert "![原文単語頻度パイチャート]" not in content
+
+
+def test_cli_digest_weekly(cli_config_dir: Path, tmp_path: Path):
+    """Test digest command outputs weekly digest_YYYY-Www.md under <root>/<YYYY>/."""
+    from datetime import datetime
+
+    from news_crawler.config import load_config
+    from news_crawler.database import Database
+    from news_crawler.models import Article, FetchMethod, SourceConfig
+
+    app_config = load_config(cli_config_dir)
+    db = Database(app_config.crawler.database_path)
+    db.upsert_source(SourceConfig(
+        key="sample_rss", name="Sample RSS", category="media",
+        fetch_method=FetchMethod.RSS, base_url="https://example.com",
+    ))
+    db.upsert_article(Article(
+        source_key="sample_rss",
+        url="https://example.com/digest-test",
+        normalized_url="https://example.com/digest-test",
+        title="Weekly Digest Article",
+        summary="A summary for testing weekly digest.",
+        content="Article content here.",
+        published_at=datetime(2026, 10, 18, 15, 30),
+        category="media",
+    ))
+
+    runner = CliRunner()
+    out_dir = tmp_path / "digests"
+    res = runner.invoke(
+        main,
+        [
+            "digest",
+            "--start-date", "2026-10-18",
+            "--end-date", "2026-10-18",
+            "--output-dir", str(out_dir),
+            "--config-dir", str(cli_config_dir),
+        ],
+    )
+    assert res.exit_code == 0
+    assert "Wrote 1 weekly digest(s)" in res.output
+
+    # 2026-10-18 belongs to ISO week 2026-W42
+    target_md = out_dir / "2026" / "digest_2026-W42.md"
+    assert target_md.exists()
+    content = target_md.read_text(encoding="utf-8")
+    assert "week: 2026-W42" in content
+    assert "Weekly Digest Article" in content

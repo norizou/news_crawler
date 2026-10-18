@@ -16,8 +16,8 @@
 - **SQLite + FTS5 全文検索**: 高速なローカル全文検索により、馬名や騎手名での横断検索が可能。
 - **柔軟な設定管理**: `config/sources.yaml` で対象ソース・セレクター・取得頻度を一元管理。
 - **日時は JST に統一**: `published_at` は取り込み時にすべて naive JST で保存します（UTC 表記のソースも変換）。旧データは `scripts/normalize_published_at.py --apply` で一度だけ変換します。
-- **日付別ダイジェスト**: AI要約付きの記事一覧を `<年>/<YYYY-MM-DD>.md` として出力（`digest`）。
-- **Markdownレポート出力**: カテゴリ別・ソース別の新着記事サマリーおよびワードクラウド画像を自動生成。
+- **週次ダイジェスト【正本】**: 月曜始まりの1週間単位で記事をまとめ、収集サマリー表・原文ワードクラウドSVG・AI要約一覧を1本に統合した Markdown を `<年>/digest_<YYYY>-W<ww>.md` として出力（`digest`）。上書きアップデート方式により週の正本ファイルが1本で完結します。
+- **Markdownレポート出力**: カテゴリ別・ソース別の新着記事サマリーおよび原文ワードクラウドSVG画像を自動生成（`<年>/weekly_report_YYYYMMDD.md`）。
 
 ---
 
@@ -277,23 +277,23 @@ uv run news-crawler enrich --llm gemini
 
 ---
 
-### 日付別ダイジェスト（`digest`）
+### 週次ダイジェスト（`digest`）
 
-記事を公開日ごとにまとめ、AI要約付きの Markdown を**日付ごと・年ごとのフォルダ**に出力します。
+記事を月曜始まりの1週間単位でまとめ、AI要約および原文ワードクラウドSVG付きの Markdown を**週ごと・年ごとのフォルダ**に出力します。
 
 ```bash
-uv run news-crawler digest                                   # 直近7日
-uv run news-crawler digest --days 30
-uv run news-crawler digest --start-date 2026-09-18 --end-date 2026-09-18   # 特定の日
+uv run news-crawler digest                                   # 直近の週（月曜〜日曜）
+uv run news-crawler digest --days 30                         # 直近30日を含む各週
+uv run news-crawler digest --start-date 2026-09-18 --end-date 2026-09-18   # 特定の日の週
 uv run news-crawler digest --only-summarized                 # AI要約済みの記事だけ
 uv run news-crawler digest -o /tmp/digests                   # 出力先の変更（試すときはこちら）
 ```
 
-- 出力先は `<report.output_dir>/<YYYY>/<YYYY-MM-DD>.md`。**冪等**で、再実行はその日のファイルを上書きします（`enrich` の進行に合わせて流し直せます）。
-- 内容は front matter（`total_articles` / `ai_summarized` / `llm_models`）→ソース別（件数の多い順）→時刻の新しい順の「日本語タイトル（リンク）＋要約」。AI 未処理の記事は原題とリンクのみです。
-- **日単位で丸ごと出力**します。`--days N` は N 日前の同時刻から始まりますが、開始日は 0:00 に広げて取ります。指定範囲の外の日に振り分けられた記事は書き出さず、警告（`Skipped ...`）を出します（欠けたファイルで完全版を上書きしないため）。
+- 出力先は `<report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md`（ISO週番号）。**冪等上書き**で、同週内の再実行はその週のファイルを最新状態にアップデートし、ファイルを増やしません。
+- 内容は front matter（`week`, `week_start`, `week_end`, `total_articles`, `ai_summarized`, `llm_models`）→原文ワードクラウドSVG（`![ワードクラウド](svg/digest_<YYYY>-W<ww>_wordcloud.svg)`）→日別見出し（新しい日順）→ソース別（件数の多い順）→時刻の新しい順の「日本語タイトル（リンク）＋要約」。AI 未処理の記事は原題とリンクのみです。
+- **週単位で丸ごと出力**します。指定期間は自動的に月曜 0:00 〜 日曜 23:59 の週境界に広げて DB から取得するため、週の途中で実行しても週前半の記事が消えることはありません。指定範囲の外の週に振り分けられた記事は書き出さず、警告（`Skipped ...`）を出します（欠けたファイルで完全版を上書きしないため）。
 - 重複記事（`dedupe --apply` 済み）と `enabled: false` のソースは既定で除外します。
-- **既知の不具合**: スクレイパーが公開日を誤って未来（例: 2028-08-09）にした記事は、公開日で絞り込むためどの日のファイルにも入りません（2026-09-20 時点で競馬ラボの告知記事 1 件）。原因は未調査です。
+- **既知の不具合**: スクレイパーが公開日を誤って未来（例: 2028-08-09）にした記事は、公開日で絞り込むためどの週のファイルにも入りません（2026-09-20 時点で競馬ラボの告知記事 1 件）。原因は未調査です。
 
 ---
 
@@ -347,7 +347,7 @@ news_crawler/
 │       ├── text_analyzer.py    # SudachiPy 形態素解析
 │       ├── visualization.py    # WordCloud 画像生成
 │       ├── reporting.py        # Markdown レポート生成
-│       ├── digest.py           # 日付別ダイジェスト（<年>/<日付>.md）
+│       ├── digest.py           # 週次ダイジェスト（<年>/digest_<YYYY>-W<ww>.md）
 │       ├── ai_processor.py     # AI要約プロセッサー
 │       ├── target_exporter.py  # TARGET frontier JV 向けレースコメントCSV出力
 │       ├── utils.py            # SSL 検証など共通ユーティリティ

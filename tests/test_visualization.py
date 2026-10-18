@@ -28,6 +28,24 @@ def test_generate_wordcloud(tmp_path):
     assert output_path.exists()
     assert output_path.stat().st_size > 0
 
+
+def test_generate_wordcloud_svg(tmp_path):
+    viz = VisualizationGenerator()
+    freq = Counter({
+        "競馬": 10,
+        "武豊": 8,
+        "秋華賞": 6,
+    })
+
+    output_path = tmp_path / "wordcloud.svg"
+    success = viz.generate_wordcloud(freq, output_path, width=800, height=400)
+
+    assert success
+    assert output_path.exists()
+    content = output_path.read_text(encoding="utf-8")
+    assert '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400"' in content
+    assert 'style="max-width: 100%; height: auto;"' in content
+
 def test_empty_frequencies(tmp_path):
     viz = VisualizationGenerator()
     freq = Counter()

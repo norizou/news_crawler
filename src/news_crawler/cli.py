@@ -13,7 +13,7 @@ from news_crawler.config import load_config
 from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
 from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
-from news_crawler.digest import write_digests
+from news_crawler.digest import week_monday, write_digests
 from news_crawler.reporting import generate_markdown_report, resolve_report_period
 from news_crawler.target_exporter import TargetCommentExporter, get_latest_race_date
 
@@ -173,7 +173,7 @@ def crawl(
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
     help="Output markdown file path "
-    "(default: <report.output_dir>/weekly_report_YYYYMMDD.md).",
+    "(default: <report.output_dir>/<YYYY>/weekly_report_YYYYMMDD.md).",
 )
 @click.option(
     "--visualize/--no-visualize",
@@ -223,9 +223,10 @@ def report(
     if output is None:
         from datetime import datetime
 
-        today_str = datetime.now().strftime("%Y%m%d")
+        now = datetime.now()
+        today_str = now.strftime("%Y%m%d")
         report_dir = report_cfg.output_dir or app_config.crawler.output_dir
-        output = Path(report_dir) / f"weekly_report_{today_str}.md"
+        output = Path(report_dir) / f"{now.year}" / f"weekly_report_{today_str}.md"
 
     # Sources disabled in config (e.g. Google News aggregators) are excluded from
     # reports by default too, since old crawled articles remain in the database.
@@ -326,9 +327,23 @@ def enrich(
     except (RuntimeError, ValueError) as e:
         console.print(f"[red]{e}[/red]")
         raise SystemExit(1) from e
-    console.print(
-        f"LLM endpoint: [cyan]{processor.active_endpoint}[/cyan] ({processor.config.model})"
-    )
+    if stats["total"] == 0:
+        # select_endpoint is skipped when nothing is eligible, so printing it
+        # would misleadingly show "None" and suggest an endpoint problem.
+        counts = db.count_enrich_candidates(
+            days=days,
+            retry_failed=retry_failed,
+            prompt_version=app_config.ai.prompt_version,
+        )
+        console.print(
+            "[dim]No eligible articles "
+            f"(excluded duplicates: {counts['excluded_duplicates']}, "
+            f"outside period: {counts['outside_window']})[/dim]"
+        )
+    else:
+        console.print(
+            f"LLM endpoint: [cyan]{processor.active_endpoint}[/cyan] ({processor.config.model})"
+        )
 
     console.print("\n[bold]Enrichment Summary:[/bold]")
     console.print(f"  Total processed: {stats['total']}")
@@ -793,7 +808,7 @@ def export_comments(
     "--only-summarized",
     is_flag=True,
     default=False,
-    help="Only list articles that have an AI summary (skip days with none).",
+    help="Only list articles that have an AI summary (skip weeks with none).",
 )
 @click.option(
     "--exclude-duplicates/--include-duplicates",
@@ -801,11 +816,17 @@ def export_comments(
     help="Exclude cross-source duplicates marked by 'dedupe' (default: exclude).",
 )
 @click.option(
+    "--visualize/--no-visualize",
+    default=None,
+    help="Enable/disable word cloud (default: report.visualize in crawler.yaml).",
+)
+@click.option(
     "--output-dir",
     "-o",
     type=click.Path(file_okay=False, path_type=Path),
     default=None,
-    help="Root directory (default: report.output_dir). Files go to <root>/<YYYY>/<date>.md.",
+    help="Root directory (default: report.output_dir). "
+    "Files go to <root>/<YYYY>/digest_<YYYY>-W<ww>.md.",
 )
 @click.option(
     "--sources-file",
@@ -826,11 +847,14 @@ def digest(
     end_date: str | None,
     only_summarized: bool,
     exclude_duplicates: bool,
+    visualize: bool | None,
     output_dir: Path | None,
     sources_file: Path | None,
     config_dir: Path,
 ) -> None:
-    """Write one Markdown file per date (<root>/<YYYY>/<YYYY-MM-DD>.md) with AI summaries."""
+    """Write one Markdown file per ISO week (<root>/<YYYY>/digest_<YYYY>-W<ww>.md)
+    with AI summaries.
+    """
     app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
     try:
@@ -841,31 +865,45 @@ def digest(
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from e
 
-    # Always cover whole days: `--days N` starts mid-day, which would otherwise write a
-    # truncated file for the oldest day and overwrite that day's complete digest.
-    start_at = datetime.combine(start_at.date(), time.min)
-    first_day, last_day = start_at.date(), (end_at - timedelta(microseconds=1)).date()
+    report_cfg = app_config.report.model_copy()
+    if visualize is not None:
+        report_cfg.visualize = visualize
+
+    # Expand query window to full Monday 00:00:00 through Sunday 23:59:59 (next Monday 00:00:00)
+    # so partial-week requests always overwrite with a complete week digest without losing articles.
+    start_monday = week_monday(start_at.date())
+    last_day = (end_at - timedelta(microseconds=1)).date()
+    last_monday = week_monday(last_day)
+    end_sunday = last_monday + timedelta(days=6)
+
+    query_start = datetime.combine(start_monday, time.min)
+    query_end = datetime.combine(end_sunday + timedelta(days=1), time.min)
 
     disabled = [k for k, src in app_config.sources.items() if not src.enabled]
     articles = db.get_articles_in_range(
-        start_at,
-        end_at,
+        query_start,
+        query_end,
         exclude_source_keys=disabled or None,
         exclude_duplicates=exclude_duplicates,
     )
     root = output_dir or Path(app_config.report.output_dir or app_config.crawler.output_dir)
     names = {k: src.name for k, src in app_config.sources.items()}
     written, skipped = write_digests(
-        articles, root, names, only_summarized=only_summarized, day_range=(first_day, last_day)
+        articles,
+        root,
+        names,
+        only_summarized=only_summarized,
+        report_config=report_cfg,
+        week_range=(start_monday, last_monday),
     )
     for path, n in written:
         console.print(f"  {path}  ({n})")
-    for day in skipped:
+    for wk in skipped:
         console.print(
-            f"[yellow]Skipped {day}: outside {first_day}..{last_day} "
-            "(re-dated article; writing it would overwrite that day's digest)[/yellow]"
+            f"[yellow]Skipped {wk}: outside {start_monday}..{end_sunday} "
+            "(re-dated article; writing it would overwrite that week's digest)[/yellow]"
         )
-    console.print(f"[green]Wrote {len(written)} daily digest(s) under {root}[/green]")
+    console.print(f"[green]Wrote {len(written)} weekly digest(s) under {root}[/green]")
 
 
 if __name__ == "__main__":

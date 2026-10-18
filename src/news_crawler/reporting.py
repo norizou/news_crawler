@@ -67,6 +67,50 @@ def resolve_report_period(
     return start_at, now, "days"
 
 
+def render_wordcloud_section(
+    articles: list[Article],
+    output_md_path: str | Path,
+    report_config: ReportConfig | None = None,
+) -> list[str]:
+    """Generate original-text word cloud SVG and return Markdown section lines."""
+    cfg = report_config or ReportConfig()
+    if not cfg.visualize or not articles:
+        return []
+
+    md_path = Path(output_md_path)
+    assets_dir = md_path.parent / cfg.output_assets_name
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    analyzer = TextAnalyzer(
+        keywords_path=cfg.ai_keywords_path,
+        sudachi_config_path=cfg.sudachi_config_path,
+        crowns_path=cfg.crowns_path,
+    )
+    viz = VisualizationGenerator(font_path=cfg.japanese_font_path)
+
+    orig_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
+    freq = analyzer.analyze_japanese(orig_texts) or analyzer.analyze_english(orig_texts)
+
+    lines: list[str] = ["## 📈 単語頻度分析", ""]
+    if freq:
+        wc_filename = f"{md_path.stem}_wordcloud.svg"
+        wc_path = assets_dir / wc_filename
+        if viz.generate_wordcloud(
+            freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height
+        ):
+            rel_link = f"{cfg.output_assets_name}/{wc_filename}"
+            lines.append(f"![ワードクラウド]({rel_link})")
+            lines.append("")
+        else:
+            lines.append("ワードクラウドの生成に失敗しました。")
+            lines.append("")
+    else:
+        lines.append("分析対象となるコンテンツがありませんでした。")
+        lines.append("")
+
+    return lines
+
+
 def generate_markdown_report(
     db: Database,
     days: int | None = None,
@@ -143,57 +187,7 @@ def generate_markdown_report(
 
     # Visualizations
     if cfg.visualize and output_path and articles:
-        lines.append("## 📈 単語頻度分析")
-        lines.append("")
-
-        assets_dir = Path(output_path).parent / f"{Path(output_path).stem}_{cfg.output_assets_name}"
-        assets_dir.mkdir(parents=True, exist_ok=True)
-
-        analyzer = TextAnalyzer(
-            keywords_path=cfg.ai_keywords_path,
-            sudachi_config_path=cfg.sudachi_config_path,
-            crowns_path=cfg.crowns_path,
-        )
-        viz = VisualizationGenerator(font_path=cfg.japanese_font_path)
-
-        # Japanese analysis
-        ja_texts = [
-            f"{a.title_ja} {a.summary_ja}"
-            for a in articles
-            if a.ai_status == "completed" and (a.title_ja or a.summary_ja)
-        ]
-        if ja_texts:
-            ja_freq = analyzer.analyze_japanese(ja_texts)
-            if ja_freq:
-                wc_path = assets_dir / "wordcloud_ja.png"
-                if viz.generate_wordcloud(
-                    ja_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height
-                ):
-                    lines.append("### 日本語ワードクラウド")
-                    lines.append(f"![日本語ワードクラウド]({assets_dir.name}/{wc_path.name})")
-                    lines.append("")
-        else:
-            lines.append("### 日本語分析")
-            lines.append("分析対象となる日本語コンテンツ（AI処理済み記事）がありませんでした。")
-            lines.append("")
-
-        # Original analysis: try Japanese morphological analysis first since the
-        # crawled sources are Japanese-language keiba media, falling back to the
-        # English word extractor for sources whose original text is English.
-        orig_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
-        en_freq = analyzer.analyze_japanese(orig_texts) or analyzer.analyze_english(orig_texts)
-        if en_freq:
-            wc_path = assets_dir / "wordcloud_original.png"
-            if viz.generate_wordcloud(
-                en_freq, wc_path, width=cfg.wordcloud_width, height=cfg.wordcloud_height
-            ):
-                lines.append("### 原文ワードクラウド")
-                lines.append(f"![原文ワードクラウド]({assets_dir.name}/{wc_path.name})")
-                lines.append("")
-        else:
-            lines.append("### 原文分析")
-            lines.append("分析対象となる原文コンテンツがありませんでした。")
-            lines.append("")
+        lines.extend(render_wordcloud_section(articles, output_path, cfg))
 
     # Summary Table
     lines.append("## 📊 収集サマリー")

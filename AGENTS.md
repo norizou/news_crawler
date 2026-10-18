@@ -4,7 +4,7 @@
 
 - **リポジトリ**: `https://github.com/norizou/news_crawler`（作業ブランチ `mac-local`。競馬ニュース用の macOS 向け）
 - **ローカルパス**: `~/Projects/Dev/news_crawler/`
-- **出力先**: レポート・日付別ダイジェストは Obsidian Vault `10_KEIBA/news_crawl/`（`config/crawler.yaml` の `report.output_dir`。Vault 側の手順書 `Docs/SKILL/news_crawler.md` が正本）
+- **出力先**: レポート・日付別ダイジェストは Obsidian Vault `10_KEIBA/10_News_crawl/`（`config/crawler.yaml` の `report.output_dir`。Vault 側の手順書 `SKILL/news_crawler.md` が正本）
 - **言語**: Python 3.13+ (uv) + Node.js (Markdown Lint)
 - **仮想環境**: `~/.virtualenvs/news_crawler`（プロジェクト直下に `.venv` を作らない）
 
@@ -61,7 +61,7 @@ uv run news-crawler report --sources-file config/sources.ai.yaml --title "AI Tre
 # クロスソース重複記事の検出（既定はdry-run。--applyでDB反映）
 uv run news-crawler dedupe --period month --apply
 
-# 日付別ダイジェスト（AI要約付き）→ <report.output_dir>/<YYYY>/<YYYY-MM-DD>.md（冪等）
+# 【正本】週次ダイジェスト（収集サマリー表＋原文ワードクラウドSVG＋AI要約統合版）→ <report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md（月曜始まり・冪等上書き）
 uv run news-crawler digest --start-date 2026-09-18 --end-date 2026-09-18
 uv run news-crawler digest --days 7 --only-summarized
 
@@ -75,6 +75,19 @@ uv run news-crawler stats
 uv run news-crawler export-comments
 uv run news-crawler export-comments --race ながつき
 uv run news-crawler export-comments --date 2026-09-19 --venue 中山
+
+# 競馬用 Sudachi ユーザー辞書のビルド (dict/keiba_user_*.dic を生成)
+uv run python scripts/build_keiba_dict.py dict/keiba_dict.csv --pckeiba
+```
+
+### Sudachi 辞書の共有 (アカウント全体)
+
+ビルドは `config/sudachi.json` と **共有 config `~/.local/share/sudachi/sudachi.json`**（絶対パス）の両方を更新する。
+他プロジェクトからは後者を指定すれば、この辞書を cwd 非依存で使える。
+
+```python
+from sudachipy import Dictionary
+Dictionary(config_path="~/.local/share/sudachi/sudachi.json")  # Path.expanduser() 推奨
 ```
 
 > **プロジェクト直下の `.venv` は `~/.virtualenvs/news_crawler` へのシンボリックリンク**（実体ではない）。
@@ -126,7 +139,8 @@ npm run lint:fix
    - 本ブランチ（`mac-local`）は macOS ネイティブ環境で完結させる（Windows / WSL2 は前提にしない）。
 
 4. **AI 要約（`enrich`）の LLM 選択**:
-   - `ai.endpoint_order`（既定: `lmstudio_12b` → `lmstudio_local`）を先頭から試し、`/models` に応答し対象モデルがロード済みの最初のエンドポイントを使う。`--llm NAME` はその1つだけを使う。
+   - `ai.endpoint_order`（既定: `lmstudio_12b` → `lmstudio_local` → `lmstudio_12b_full`）を先頭から試し、`/models` に応答し対象モデルがロード済みの最初のエンドポイントを使う。`--llm NAME` はその1つだけを使う。
+   - `lmstudio_12b`（`gemma-4-12b-qat`）は LM Link 経由のリモート機モデルで、`/models` に出たり消えたりすることがある。不在時はローカル常駐の `lmstudio_12b_full`（`gemma-4-12b`、フル精度）へ自動フォールバックする（2026/10/14 追加）。
    - `gemini` は外部送信・従量課金のため既定の順序に入れない。キーは `.env` の `GEMINI_API_KEY`（Git に入れない）。
    - **思考モデルは `max_tokens` を大きくする**（gemma-4 は思考トークンも消費する。500 だと `content` が空になり全件 `Invalid AI response format` で失敗）。
    - 記録される `ai_model` は実際に使ったモデル。
@@ -137,13 +151,16 @@ npm run lint:fix
    - `normalizer.parse_datetime()` がオフセット付き（`Z` / `+00:00` / `+09:00`）を JST に変換してオフセットを外す。SQLite 上の範囲検索は文字列比較のため、表記を統一しないと日付境界がずれる。
    - 旧データ（オフセット付き混在）は `scripts/normalize_published_at.py --apply` で一括変換済み（冪等。バックアップを自動作成）。
 
-6. **日付別ダイジェスト（`digest`）は日単位で丸ごと書く冪等な出力**:
-   - 範囲の外の日に振り分けられた記事は書き出さない（既存の完全版ファイルを断片で上書きしないため）。試すときは `-o /tmp/...` で別の場所に出す。
-   - **既知の不具合**: 公開日が未来になった記事（例: id 311・競馬ラボ・2028-08-09）はどの日にも入らない。原因未調査。
+6. **週次ダイジェスト（`digest`）は月曜始まりの1週間単位で丸ごと書く冪等な出力**:
+   - 出力先は `<report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md`（ISO週番号）。同じ週に何度実行しても該当週の1ファイルに上書きアップデートされ、ファイルは増えない。
+   - 指定期間は自動的に月曜 00:00 〜 日曜 23:59 の週境界へ拡張して取得するため、週の途中実行でも週前半の記事が消えることはない。
+   - ワードクラウドは原文のみ1枚（`svg/digest_<YYYY>-W<ww>_wordcloud.svg`）を生成して Markdown からリンク参照する。
+   - 範囲の外の週に振り分けられた記事は書き出さない（既存の完全版ファイルを断片で上書きしないため）。試すときは `-o /tmp/...` で別の場所に出す。
+   - **既知の不具合**: 公開日が未来になった記事（例: id 311・競馬ラボ・2028-08-09）はどの週にも入らない。原因未調査。
 
 ---
 
 ## テスト時の注意
 
 - `uv run pytest` は環境の `FORCE_COLOR`（一部の CI・エージェントのシェルが設定）に依存しないよう、`tests/conftest.py` の autouse フィクスチャで `cli.console` / `coordinator.console` を色なしに差し替えている。これが無いと出力に ANSI コードが混ざり、`"Total New: 2"` のような文字列比較が失敗する。**新しいモジュールに module-level の `Console()` を足したら、同フィクスチャにも追加する。**
-- `enrich` / `digest` を実データで試すときは、`data/articles.db` と Vault の `news_crawl/` を書き換える。ダイジェストは `-o` で別の場所へ出すこと。
+- `enrich` / `digest` を実データで試すときは、`data/articles.db` と Vault の `10_News_crawl/` を書き換える。ダイジェストは `-o` で別の場所へ出すこと。

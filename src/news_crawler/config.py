@@ -133,7 +133,7 @@ class ReportConfig(BaseModel):
     )
     visualize: bool = Field(default=False, description="Enable visualization")
     japanese_font_path: str = Field(default="", description="Path to Japanese font file")
-    output_assets_name: str = Field(default="assets", description="Name of assets directory")
+    output_assets_name: str = Field(default="svg", description="Name of assets directory")
     wordcloud_width: int = Field(default=800, description="Word cloud width")
     wordcloud_height: int = Field(default=400, description="Word cloud height")
     ai_keywords_path: str = Field(
