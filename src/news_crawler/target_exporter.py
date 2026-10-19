@@ -152,10 +152,32 @@ def extract_schedule_map(db: Database, target_date: str) -> dict[str, tuple[int,
     Extract (kai, nichi) schedule per venue from JRA official news articles in database.
     Returns: {venue_name: (kai, nichi)}
     """
-    articles = db.get_recent_articles(days=30, source_key="jra", limit=100)
-    schedule_map: dict[str, tuple[int, int]] = {}
-
     target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+    start_iso = (target_dt - timedelta(days=14)).isoformat()
+    end_iso = (target_dt + timedelta(days=2)).isoformat()
+
+    with db.connection() as conn:
+        cur = conn.execute(
+            """
+            SELECT * FROM articles
+            WHERE (source_key = 'jra' OR category = 'official')
+              AND (
+                (published_at >= ? AND published_at < ?)
+                OR (published_at IS NULL AND fetched_at >= ? AND fetched_at < ?)
+              )
+            ORDER BY COALESCE(published_at, fetched_at) DESC
+            LIMIT 100
+            """,
+            (start_iso, end_iso, start_iso, end_iso),
+        )
+        rows = cur.fetchall()
+        articles = [db._row_to_article(row) for row in rows]
+
+    if not articles:
+        # Fallback to recent articles if no articles found near target_date
+        articles = db.get_recent_articles(days=30, source_key="jra", limit=100)
+
+    schedule_map: dict[str, tuple[int, int]] = {}
     t_month = target_dt.month
     t_day = target_dt.day
 
