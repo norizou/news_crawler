@@ -1,7 +1,14 @@
 from datetime import date, datetime, timedelta, timezone
 
-from news_crawler.config import ReportConfig
-from news_crawler.digest import article_date, render_week, week_monday, write_digests
+from news_crawler.config import ReportConfig, SourceConfig
+from news_crawler.database import Database
+from news_crawler.digest import (
+    article_date,
+    get_latest_valid_article_date,
+    render_week,
+    week_monday,
+    write_digests,
+)
 from news_crawler.models import Article
 
 JST = timezone(timedelta(hours=9))
@@ -133,4 +140,63 @@ stopwords_general:
 
     svg_file = tmp_path / "2026" / "svg" / "digest_2026-W38_wordcloud.svg"
     assert svg_file.exists()
+
+
+def test_get_latest_valid_article_date(tmp_path):
+    """Test get_latest_valid_article_date handles ISO 'T' timestamps,
+    future dates, and disabled sources.
+    """
+    db = Database(tmp_path / "test_latest.db")
+    for key in ("netkeiba", "disabled_src"):
+        db.upsert_source(
+            SourceConfig(
+                key=key,
+                name=key,
+                category="media",
+                fetch_method="rss",
+                enabled=(key != "disabled_src"),
+                base_url="https://example.com",
+            )
+        )
+
+    today = datetime.now().replace(hour=0, minute=5, second=0, microsecond=0)
+    yesterday = today - timedelta(days=1)
+    future = today + timedelta(days=365)
+
+    # Yesterday's article
+    db.upsert_article(
+        _art(
+            url="https://example.com/yest",
+            normalized_url="https://example.com/yest",
+            published_at=yesterday,
+        )
+    )
+    # Today's early morning article (00:05) — regression test for 'T' vs space comparison
+    db.upsert_article(
+        _art(
+            url="https://example.com/today",
+            normalized_url="https://example.com/today",
+            published_at=today,
+        )
+    )
+    # Bogus future article — must be ignored
+    db.upsert_article(
+        _art(
+            url="https://example.com/future",
+            normalized_url="https://example.com/future",
+            published_at=future,
+        )
+    )
+    # Disabled source article on tomorrow — must be excluded when exclude_source_keys passed
+    db.upsert_article(
+        _art(
+            source_key="disabled_src",
+            url="https://example.com/disabled",
+            normalized_url="https://example.com/disabled",
+            published_at=today + timedelta(days=1),
+        )
+    )
+
+    latest = get_latest_valid_article_date(db, exclude_source_keys=["disabled_src"])
+    assert latest == today.date()
 

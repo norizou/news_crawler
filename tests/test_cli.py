@@ -382,7 +382,18 @@ def test_cli_digest_weekly(cli_config_dir: Path, tmp_path: Path):
 
 @respx.mock
 def test_cli_crawl_auto_updates_digest(cli_config_dir: Path, tmp_path: Path):
-    """Test that crawl command automatically updates weekly digest and wordcloud."""
+    """Test that crawl command automatically updates weekly digest and wordcloud SVG."""
+    (cli_config_dir / "crawler.yaml").write_text(
+        f"""
+crawler:
+  download_delay: 0.0
+  database_path: "{tmp_path / 'cli_test.db'}"
+  output_dir: "{tmp_path / 'output'}"
+report:
+  visualize: true
+""",
+        encoding="utf-8",
+    )
     feed_xml = (FIXTURES_DIR / "sample_rss.xml").read_text(encoding="utf-8")
     respx.get("https://example.com/rss.xml").mock(return_value=httpx.Response(200, text=feed_xml))
 
@@ -392,7 +403,124 @@ def test_cli_crawl_auto_updates_digest(cli_config_dir: Path, tmp_path: Path):
     assert "Updating current week's digest and wordcloud" in res.output
     assert "Updated:" in res.output
 
-    # Digest file should have been generated in output directory
     out_dir = tmp_path / "output"
-    digest_files = list(out_dir.glob("*/digest_*.md"))
-    assert len(digest_files) >= 1
+    digest_md = out_dir / "2026" / "digest_2026-W38.md"
+    wordcloud_svg = out_dir / "2026" / "svg" / "digest_2026-W38_wordcloud.svg"
+    assert digest_md.exists()
+    assert wordcloud_svg.exists()
+    assert "<svg" in wordcloud_svg.read_text(encoding="utf-8")
+    md_text = digest_md.read_text(encoding="utf-8")
+    assert "![ワードクラウド](svg/digest_2026-W38_wordcloud.svg)" in md_text
+
+
+@respx.mock
+def test_cli_crawl_cross_week_dedupe_and_future_date(tmp_path: Path):
+    """Test crawl updates both previous & current week on cross-week articles,
+    deduplicates cross-source articles before generating wordcloud/digest,
+    and ignores bogus future dates when determining the update window.
+    """
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    out_dir = tmp_path / "output"
+
+    (cfg_dir / "crawler.yaml").write_text(
+        f"""
+crawler:
+  download_delay: 0.0
+  database_path: "{tmp_path / 'cli_test.db'}"
+  output_dir: "{out_dir}"
+report:
+  visualize: true
+  ai_keywords_path: "config/keiba_keywords.yaml"
+""",
+        encoding="utf-8",
+    )
+    (cfg_dir / "sources.yaml").write_text(
+        """
+sources:
+  src_a:
+    name: "Source A"
+    category: "media"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://a.example.com"
+    feed_url: "https://a.example.com/rss.xml"
+  src_b:
+    name: "Source B"
+    category: "sports_paper"
+    fetch_method: "rss"
+    enabled: true
+    base_url: "https://b.example.com"
+    feed_url: "https://b.example.com/rss.xml"
+""",
+        encoding="utf-8",
+    )
+
+    rss_a = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>A</title>
+  <item>
+    <title>【秋華賞】日曜日のレース結果と振り返りレポート</title>
+    <link>https://a.example.com/1</link>
+    <description>日曜日の京都競馬場で行われた秋華賞の振り返りです。</description>
+    <pubDate>Sun, 18 Oct 2026 17:00:00 +0900</pubDate>
+  </item>
+  <item>
+    <title>【菊花賞】ロブチェンが三冠達成へ向けて最終追い切りを消化</title>
+    <link>https://a.example.com/2</link>
+    <description>ロブチェンが栗東トレセンで追い切りを消化しました。</description>
+    <pubDate>Mon, 19 Oct 2026 07:30:00 +0900</pubDate>
+  </item>
+</channel></rss>"""
+
+    rss_b = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>B</title>
+  <item>
+    <title>【菊花賞】ロブチェンが三冠達成へ向けて最終追い切りを消化</title>
+    <link>https://b.example.com/dup</link>
+    <description>同一見出しの重複配信記事です。</description>
+    <pubDate>Mon, 19 Oct 2026 08:00:00 +0900</pubDate>
+  </item>
+  <item>
+    <title>未来日付の告知記事テスト</title>
+    <link>https://b.example.com/future</link>
+    <description>誤パースされた未来日付の記事です。</description>
+    <pubDate>Thu, 12 Oct 2028 10:00:00 +0900</pubDate>
+  </item>
+</channel></rss>"""
+
+    respx.get("https://a.example.com/rss.xml").mock(return_value=httpx.Response(200, text=rss_a))
+    respx.get("https://b.example.com/rss.xml").mock(return_value=httpx.Response(200, text=rss_b))
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["crawl", "--config-dir", str(cfg_dir)])
+    assert res.exit_code == 0
+
+    # Both W42 (Sun Oct 18) and W43 (Mon Oct 19) must be generated with their SVG wordclouds
+    w42_md = out_dir / "2026" / "digest_2026-W42.md"
+    w42_svg = out_dir / "2026" / "svg" / "digest_2026-W42_wordcloud.svg"
+    w43_md = out_dir / "2026" / "digest_2026-W43.md"
+    w43_svg = out_dir / "2026" / "svg" / "digest_2026-W43_wordcloud.svg"
+
+    assert w42_md.exists(), "Previous week digest (W42) should be updated on cross-week crawl"
+    assert w42_svg.exists(), "Previous week wordcloud SVG (W42) should be generated"
+    assert w43_md.exists(), "Current week digest (W43) should be updated"
+    assert w43_svg.exists(), "Current week wordcloud SVG (W43) should be generated"
+
+    # Cross-source duplicate on Mon Oct 19 should have been deduplicated before writing W43
+    w43_text = w43_md.read_text(encoding="utf-8")
+    assert "https://a.example.com/2" in w43_text
+    assert "https://b.example.com/dup" not in w43_text
+
+
+@respx.mock
+def test_cli_crawl_no_update_digest_flag(cli_config_dir: Path, tmp_path: Path):
+    """Test that --no-update-digest skips digest and wordcloud generation."""
+    feed_xml = (FIXTURES_DIR / "sample_rss.xml").read_text(encoding="utf-8")
+    respx.get("https://example.com/rss.xml").mock(return_value=httpx.Response(200, text=feed_xml))
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["crawl", "--no-update-digest", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+    assert "Updating current week's digest and wordcloud" not in res.output
+    out_dir = tmp_path / "output"
+    assert list(out_dir.glob("*/digest_*.md")) == []

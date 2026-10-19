@@ -1,6 +1,7 @@
 """Command-line interface for AI Scraper."""
 
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 
 import click
@@ -12,7 +13,7 @@ from news_crawler.config import load_config
 from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
 from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
-from news_crawler.digest import run_digest_update
+from news_crawler.digest import get_latest_valid_article_date, run_digest_update
 from news_crawler.reporting import generate_markdown_report, resolve_report_period
 from news_crawler.target_exporter import TargetCommentExporter, get_latest_race_date
 
@@ -108,23 +109,24 @@ def crawl(
         console.print("[cyan]Updating current week's digest and wordcloud...[/cyan]")
         db = Database(app_config.crawler.database_path)
         try:
-            with db.connection() as conn:
-                query = (
-                    "SELECT max(published_at) FROM articles "
-                    "WHERE published_at <= datetime('now', '+1 day')"
-                )
-                row = conn.execute(query).fetchone()
-                latest_pub = row[0] if row and row[0] else None
+            disabled = [k for k, src in app_config.sources.items() if not src.enabled]
+            latest_date = get_latest_valid_article_date(
+                db, exclude_source_keys=disabled or None
+            )
 
             start_d = None
             end_d = None
-            if latest_pub:
-                latest_str = str(latest_pub)[:10]
-                start_d = latest_str
-                end_d = latest_str
+            if latest_date is not None:
+                start_d = (latest_date - timedelta(days=6)).isoformat()
+                end_d = latest_date.isoformat()
 
             written, skipped, _ = run_digest_update(
-                app_config, db, days=None, start_date=start_d, end_date=end_d
+                app_config,
+                db,
+                days=None,
+                start_date=start_d,
+                end_date=end_d,
+                dedupe_first=True,
             )
             for path, n in written:
                 console.print(f"  [green]Updated:[/green] {path} ({n} articles)")

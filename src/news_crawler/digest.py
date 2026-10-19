@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from news_crawler.config import ReportConfig
+from news_crawler.dedupe import run_dedupe
 from news_crawler.models import Article
 from news_crawler.reporting import render_wordcloud_section, resolve_report_period
 
@@ -209,6 +210,30 @@ def write_digests(
     return written, skipped
 
 
+def get_latest_valid_article_date(
+    db: "Database",
+    exclude_source_keys: list[str] | None = None,
+) -> date | None:
+    """Return the latest valid article published_at date (not in the future, local JST)."""
+    max_valid_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    query = (
+        "SELECT date(published_at) FROM articles "
+        "WHERE published_at IS NOT NULL AND date(published_at) <= ?"
+    )
+    params: list[str] = [max_valid_date]
+    if exclude_source_keys:
+        placeholders = ",".join("?" for _ in exclude_source_keys)
+        query += f" AND source_key NOT IN ({placeholders})"
+        params.extend(exclude_source_keys)
+    query += " ORDER BY date(published_at) DESC LIMIT 1"
+
+    with db.connection() as conn:
+        row = conn.execute(query, params).fetchone()
+        if row and row[0]:
+            return date.fromisoformat(str(row[0]))
+    return None
+
+
 def run_digest_update(
     app_config: "AppConfig",
     db: "Database",
@@ -218,6 +243,7 @@ def run_digest_update(
     end_date: str | None = None,
     only_summarized: bool = False,
     exclude_duplicates: bool = True,
+    dedupe_first: bool = False,
     visualize: bool | None = None,
     output_dir: Path | None = None,
 ) -> tuple[list[tuple[Path, int]], list[str], tuple[date, date]]:
@@ -240,6 +266,9 @@ def run_digest_update(
 
     query_start = datetime.combine(start_monday, time.min)
     query_end = datetime.combine(end_sunday + timedelta(days=1), time.min)
+
+    if dedupe_first:
+        run_dedupe(db, query_start, query_end, dry_run=False)
 
     disabled = [k for k, src in app_config.sources.items() if not src.enabled]
     articles = db.get_articles_in_range(
