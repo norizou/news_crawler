@@ -91,15 +91,22 @@ uv run news-crawler list-sources
 ### クロールの実行
 
 ```bash
-# 全ソースのクロール実行
+# 全ソースのクロール実行（完了時に当週の週次ダイジェスト・ワードクラウドSVGを自動更新）
 uv run news-crawler crawl
+
+# ダイジェスト・ワードクラウドの自動更新をスキップしてクロールのみ実行
+uv run news-crawler crawl --no-update-digest
 
 # 特定ソースのみクロール（例: netkeiba）
 uv run news-crawler crawl --source netkeiba
 
-# dry-run（DB保存なしで取得動作のみ確認）
+# dry-run（DB保存なしで取得動作のみ確認。ダイジェスト更新も行われません）
 uv run news-crawler crawl --dry-run
 ```
+
+> **クロール時のダイジェスト自動更新**:
+> クロール完了後、直近7日間のクロスソース重複判定（`dedupe`）が自動適用され、当週（週またぎ時は前週を含む）の週次ダイジェスト Markdown（`<年>/digest_<YYYY>-W<ww>.md`）および原文ワードクラウド SVG が最新データで自動更新されます。これにより、日常のクロール実行だけで常に最新の週次ダイジェストとワードクラウドが生成されます。
+
 
 ### 現在の登録ソース一覧（有効8 + 無効3 = 計11サイト）
 
@@ -290,6 +297,7 @@ uv run news-crawler digest -o /tmp/digests                   # 出力先の変�
 ```
 
 - 出力先は `<report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md`（ISO週番号）。**冪等上書き**で、同週内の再実行はその週のファイルを最新状態にアップデートし、ファイルを増やしません。
+- **クロール連動の自動更新**: `news-crawler crawl` 実行時にも直近7日分を対象として自動で重複排除および本ダイジェスト＋ワードクラウドSVGの更新が行われます。日常運用では `crawl` を実行するだけで常に当週のダイジェストが最新化されます。過去週の再生成や特定期間の更新には本 `digest` サブコマンドを使用します。
 - 内容は front matter（`week`, `week_start`, `week_end`, `total_articles`, `ai_summarized`, `llm_models`）→原文ワードクラウドSVG（`![ワードクラウド](svg/digest_<YYYY>-W<ww>_wordcloud.svg)`）→日別見出し（新しい日順）→ソース別（件数の多い順）→時刻の新しい順の「日本語タイトル（リンク）＋要約」。AI 未処理の記事は原題とリンクのみです。
 - **週単位で丸ごと出力**します。指定期間は自動的に月曜 0:00 〜 日曜 23:59 の週境界に広げて DB から取得するため、週の途中で実行しても週前半の記事が消えることはありません。指定範囲の外の週に振り分けられた記事は書き出さず、警告（`Skipped ...`）を出します（欠けたファイルで完全版を上書きしないため）。
 - 重複記事（`dedupe --apply` 済み）と `enabled: false` のソースは既定で除外します。

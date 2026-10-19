@@ -33,13 +33,16 @@
 ```bash
 cd ~/Projects/Dev/news_crawler
 
-# クロール実行 (全ソース)
+# クロール実行 (全ソース。完了時に当週の週次ダイジェスト・ワードクラウドSVGを自動更新)
 uv run news-crawler crawl
+
+# ダイジェスト自動更新をスキップしてクロールのみ実行
+uv run news-crawler crawl --no-update-digest
 
 # 特定ソースのみクロール
 uv run news-crawler crawl --source netkeiba
 
-# dry-run
+# dry-run (DB保存なし・ダイジェスト更新なし)
 uv run news-crawler crawl --dry-run
 
 # AI翻訳・要約 (config/crawler.yamlでai.enabled: true)
