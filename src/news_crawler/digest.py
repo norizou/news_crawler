@@ -1,14 +1,19 @@
 """Weekly digest: one Markdown file per ISO week (Monday-Sunday), managed per year."""
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from news_crawler.config import ReportConfig
 from news_crawler.models import Article
-from news_crawler.reporting import render_wordcloud_section
+from news_crawler.reporting import render_wordcloud_section, resolve_report_period
+
+if TYPE_CHECKING:
+    from news_crawler.config import AppConfig
+    from news_crawler.database import Database
 
 _WEEKDAY_NAMES_JA = ["月", "火", "水", "木", "金", "土", "日"]
 
@@ -202,3 +207,55 @@ def write_digests(
         path.write_text(body, encoding="utf-8")
         written.append((path, len(items)))
     return written, skipped
+
+
+def run_digest_update(
+    app_config: "AppConfig",
+    db: "Database",
+    *,
+    days: int | None = 7,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    only_summarized: bool = False,
+    exclude_duplicates: bool = True,
+    visualize: bool | None = None,
+    output_dir: Path | None = None,
+) -> tuple[list[tuple[Path, int]], list[str], tuple[date, date]]:
+    """Query database for date range, expand to ISO week boundaries, and write weekly digests.
+
+    Returns (written, skipped_weeks, (start_monday, end_sunday)).
+    """
+    start_at, end_at, _mode = resolve_report_period(
+        days if days is not None or start_date else 7, start_date, end_date, None
+    )
+
+    report_cfg = app_config.report.model_copy()
+    if visualize is not None:
+        report_cfg.visualize = visualize
+
+    start_monday = week_monday(start_at.date())
+    last_day = (end_at - timedelta(microseconds=1)).date()
+    last_monday = week_monday(last_day)
+    end_sunday = last_monday + timedelta(days=6)
+
+    query_start = datetime.combine(start_monday, time.min)
+    query_end = datetime.combine(end_sunday + timedelta(days=1), time.min)
+
+    disabled = [k for k, src in app_config.sources.items() if not src.enabled]
+    articles = db.get_articles_in_range(
+        query_start,
+        query_end,
+        exclude_source_keys=disabled or None,
+        exclude_duplicates=exclude_duplicates,
+    )
+    root = output_dir or Path(app_config.report.output_dir or app_config.crawler.output_dir)
+    names = {k: src.name for k, src in app_config.sources.items()}
+    written, skipped = write_digests(
+        articles,
+        root,
+        names,
+        only_summarized=only_summarized,
+        report_config=report_cfg,
+        week_range=(start_monday, last_monday),
+    )
+    return written, skipped, (start_monday, end_sunday)

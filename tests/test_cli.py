@@ -378,3 +378,21 @@ def test_cli_digest_weekly(cli_config_dir: Path, tmp_path: Path):
     content = target_md.read_text(encoding="utf-8")
     assert "week: 2026-W42" in content
     assert "Weekly Digest Article" in content
+
+
+@respx.mock
+def test_cli_crawl_auto_updates_digest(cli_config_dir: Path, tmp_path: Path):
+    """Test that crawl command automatically updates weekly digest and wordcloud."""
+    feed_xml = (FIXTURES_DIR / "sample_rss.xml").read_text(encoding="utf-8")
+    respx.get("https://example.com/rss.xml").mock(return_value=httpx.Response(200, text=feed_xml))
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["crawl", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+    assert "Updating current week's digest and wordcloud" in res.output
+    assert "Updated:" in res.output
+
+    # Digest file should have been generated in output directory
+    out_dir = tmp_path / "output"
+    digest_files = list(out_dir.glob("*/digest_*.md"))
+    assert len(digest_files) >= 1

@@ -1,7 +1,6 @@
 """Command-line interface for AI Scraper."""
 
 import asyncio
-from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import click
@@ -13,7 +12,7 @@ from news_crawler.config import load_config
 from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
 from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
-from news_crawler.digest import week_monday, write_digests
+from news_crawler.digest import run_digest_update
 from news_crawler.reporting import generate_markdown_report, resolve_report_period
 from news_crawler.target_exporter import TargetCommentExporter, get_latest_race_date
 
@@ -54,11 +53,17 @@ def main() -> None:
     default="config",
     help="Path to configuration directory.",
 )
+@click.option(
+    "--update-digest/--no-update-digest",
+    default=True,
+    help="Update current week's digest and wordcloud after crawling (default: True).",
+)
 def crawl(
     source_key: str | None,
     dry_run: bool,
     sources_file: Path | None,
     config_dir: Path,
+    update_digest: bool,
 ) -> None:
     """Execute scraping across registered AI information sources."""
     app_config = load_config(config_dir, sources_file=sources_file)
@@ -98,6 +103,33 @@ def crawl(
         f"Updated: [blue]{run.updated_count}[/blue], "
         f"Success: {run.success_count}/{run.total_sources}"
     )
+
+    if not dry_run and update_digest:
+        console.print("[cyan]Updating current week's digest and wordcloud...[/cyan]")
+        db = Database(app_config.crawler.database_path)
+        try:
+            with db.connection() as conn:
+                query = (
+                    "SELECT max(published_at) FROM articles "
+                    "WHERE published_at <= datetime('now', '+1 day')"
+                )
+                row = conn.execute(query).fetchone()
+                latest_pub = row[0] if row and row[0] else None
+
+            start_d = None
+            end_d = None
+            if latest_pub:
+                latest_str = str(latest_pub)[:10]
+                start_d = latest_str
+                end_d = latest_str
+
+            written, skipped, _ = run_digest_update(
+                app_config, db, days=None, start_date=start_d, end_date=end_d
+            )
+            for path, n in written:
+                console.print(f"  [green]Updated:[/green] {path} ({n} articles)")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Failed to update digest/wordcloud:[/yellow] {e}")
 
 
 @main.command()
@@ -858,44 +890,22 @@ def digest(
     app_config = load_config(config_dir, sources_file=sources_file)
     db = Database(app_config.crawler.database_path)
     try:
-        start_at, end_at, _mode = resolve_report_period(
-            days if days is not None or start_date else 7, start_date, end_date, None
+        written, skipped, (start_monday, end_sunday) = run_digest_update(
+            app_config,
+            db,
+            days=days,
+            start_date=start_date,
+            end_date=end_date,
+            only_summarized=only_summarized,
+            exclude_duplicates=exclude_duplicates,
+            visualize=visualize,
+            output_dir=output_dir,
         )
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from e
 
-    report_cfg = app_config.report.model_copy()
-    if visualize is not None:
-        report_cfg.visualize = visualize
-
-    # Expand query window to full Monday 00:00:00 through Sunday 23:59:59 (next Monday 00:00:00)
-    # so partial-week requests always overwrite with a complete week digest without losing articles.
-    start_monday = week_monday(start_at.date())
-    last_day = (end_at - timedelta(microseconds=1)).date()
-    last_monday = week_monday(last_day)
-    end_sunday = last_monday + timedelta(days=6)
-
-    query_start = datetime.combine(start_monday, time.min)
-    query_end = datetime.combine(end_sunday + timedelta(days=1), time.min)
-
-    disabled = [k for k, src in app_config.sources.items() if not src.enabled]
-    articles = db.get_articles_in_range(
-        query_start,
-        query_end,
-        exclude_source_keys=disabled or None,
-        exclude_duplicates=exclude_duplicates,
-    )
     root = output_dir or Path(app_config.report.output_dir or app_config.crawler.output_dir)
-    names = {k: src.name for k, src in app_config.sources.items()}
-    written, skipped = write_digests(
-        articles,
-        root,
-        names,
-        only_summarized=only_summarized,
-        report_config=report_cfg,
-        week_range=(start_monday, last_monday),
-    )
     for path, n in written:
         console.print(f"  {path}  ({n})")
     for wk in skipped:
