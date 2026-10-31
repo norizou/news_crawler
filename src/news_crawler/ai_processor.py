@@ -14,6 +14,34 @@ from news_crawler.config import AIConfig, AIEndpoint
 from news_crawler.database import Database
 from news_crawler.models import AIResponse, Article
 
+PACKED_PROMPT_SUFFIX = """\
+Multiple articles are provided in this request. Each one starts with a line "### id=<number>".
+This overrides the output format above:
+- Process each article independently, following the guidelines above
+- Never mix content between articles; each title and summary must come only from its own article
+- Output ONLY a JSON object of the form
+  {"articles": [{"id": <number>, "title_ja": "...", "summary_ja": "..."}, ...]}
+  with exactly one entry per article, using the same id as its "### id=" line"""
+
+PACKED_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "articles": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "title_ja": {"type": "string"},
+                    "summary_ja": {"type": "string"},
+                },
+                "required": ["id", "title_ja", "summary_ja"],
+            },
+        }
+    },
+    "required": ["articles"],
+}
+
 
 class AIProcessor:
     """Handles AI enrichment of articles via AIA Proxy."""
@@ -79,6 +107,8 @@ class AIProcessor:
                             if ep.reasoning_effort is not None
                             else cfg.reasoning_effort
                         ),
+                        "pack_size": ep.pack_size or 1,
+                        "pack_max_tokens": ep.pack_max_tokens,
                     }
                 )
                 self._auth_env = ep.api_key_env
@@ -112,6 +142,9 @@ class AIProcessor:
 
         await self.select_endpoint(self.only_endpoint)
 
+        if self.config.pack_size > 1:
+            return await self._enrich_packed(articles)
+
         success_count = 0
         failed_count = 0
         skipped_count = 0
@@ -139,16 +172,83 @@ class AIProcessor:
             "total": len(articles),
         }
 
+    async def _enrich_packed(self, articles: list[Article]) -> dict[str, int]:
+        """Enrich articles `pack_size` at a time, one API request per pack."""
+        skipped_count = 0
+        todo: list[Article] = []
+        for article in articles:
+            if article.id is None:
+                continue
+            if self._is_up_to_date(article):
+                skipped_count += 1
+            else:
+                todo.append(article)
+
+        success_count = 0
+        failed_count = 0
+        size = self.config.pack_size
+        packs = [todo[i : i + size] for i in range(0, len(todo), size)]
+        for idx, pack in enumerate(packs):
+            ok, ng = await self._enrich_pack(pack)
+            success_count += ok
+            failed_count += ng
+
+            # Sleep between requests to respect rate limits (not after the last pack)
+            if self.config.request_interval > 0 and idx < len(packs) - 1:
+                await self.sleeper(self.config.request_interval)
+
+        return {
+            "skipped": skipped_count,
+            "success": success_count,
+            "failed": failed_count,
+            "total": len(articles),
+        }
+
+    async def _enrich_pack(self, pack: list[Article]) -> tuple[int, int]:
+        """Send one packed request and save each article's result. Returns (success, failed)."""
+        try:
+            response = await self._post_with_retry(self._build_packed_payload(pack))
+            content = response["choices"][0]["message"]["content"]
+            results = self._parse_packed_response(content)
+        except Exception as e:
+            for article in pack:
+                if article.id is not None:
+                    self.db.save_ai_failure(article.id, str(e))
+            return 0, len(pack)
+
+        success = 0
+        for article in pack:
+            if article.id is None:
+                continue
+            ai_result = results.get(article.id)
+            if ai_result is None:
+                self.db.save_ai_failure(article.id, "Missing from packed AI response")
+                continue
+            self.db.save_ai_result(
+                article_id=article.id,
+                title_ja=ai_result.title_ja,
+                summary_ja=ai_result.summary_ja,
+                model=self.config.model,
+                prompt_version=self.config.prompt_version,
+                input_hash=self._compute_input_hash(article),
+            )
+            success += 1
+        return success, len(pack) - success
+
+    def _is_up_to_date(self, article: Article) -> bool:
+        """True if the article was already enriched from the same input, model and prompt."""
+        return (
+            article.ai_status == "completed"
+            and article.ai_input_hash == self._compute_input_hash(article)
+            and article.ai_model == self.config.model
+            and article.ai_prompt_version == self.config.prompt_version
+        )
+
     async def _enrich_single_article(self, article: Article) -> bool:
         """Enrich a single article. Returns False if skipped (already up to date)."""
         # Skip if already completed with same input hash
         input_hash = self._compute_input_hash(article)
-        if (
-            article.ai_status == "completed"
-            and article.ai_input_hash == input_hash
-            and article.ai_model == self.config.model
-            and article.ai_prompt_version == self.config.prompt_version
-        ):
+        if self._is_up_to_date(article):
             return False
 
         # Prepare input text
@@ -214,6 +314,10 @@ class AIProcessor:
         if self.config.reasoning_effort:
             payload["reasoning_effort"] = self.config.reasoning_effort
 
+        return await self._post_with_retry(payload)
+
+    async def _post_with_retry(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST a chat/completions payload with retry logic."""
         last_error: Exception | None = None
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -270,6 +374,71 @@ class AIProcessor:
             "Please process the following article and provide the Japanese title "
             f"and summary in JSON format:\n\n{input_text}"
         )
+
+    def _build_packed_system_prompt(self) -> str:
+        """System prompt for several articles in one request (output format overridden)."""
+        return (
+            self.config.system_prompt.rstrip()
+            + "\n\n"
+            + PACKED_PROMPT_SUFFIX
+        )
+
+    def _build_packed_user_prompt(self, articles: list[Article]) -> str:
+        """Concatenate articles, each headed by its id marker."""
+        blocks = [
+            f"### id={article.id}\n{self._prepare_input_text(article)}" for article in articles
+        ]
+        return (
+            f"Please process the following {len(articles)} articles and provide "
+            "the Japanese title and summary of each in JSON format:\n\n" + "\n\n".join(blocks)
+        )
+
+    def _build_packed_payload(self, articles: list[Article]) -> dict[str, Any]:
+        """Build a chat/completions payload covering all articles in the pack."""
+        max_tokens = self.config.pack_max_tokens or self.config.max_tokens * len(articles)
+        payload: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": [
+                {"role": "system", "content": self._build_packed_system_prompt()},
+                {"role": "user", "content": self._build_packed_user_prompt(articles)},
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.3,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "packed_articles", "schema": PACKED_RESPONSE_SCHEMA},
+            },
+        }
+        if self.config.reasoning_effort:
+            payload["reasoning_effort"] = self.config.reasoning_effort
+        return payload
+
+    def _parse_packed_response(self, content: str) -> dict[int, AIResponse]:
+        """Parse a packed response into {article_id: AIResponse}.
+
+        Raises ValueError if the response as a whole is not valid JSON. Individual
+        malformed entries are dropped, so only those articles end up failed.
+        """
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL)
+        json_str = fenced.group(1) if fenced else content.strip()
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid packed AI response format: {e}") from e
+
+        items = data.get("articles") if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            raise ValueError("Invalid packed AI response format: no 'articles' list")
+
+        results: dict[int, AIResponse] = {}
+        for item in items:
+            try:
+                article_id = int(item["id"])
+                ai_result = AIResponse(title_ja=item["title_ja"], summary_ja=item["summary_ja"])
+            except (TypeError, KeyError, ValueError, ValidationError):
+                continue
+            results.setdefault(article_id, ai_result)
+        return results
 
     def _parse_ai_response(self, response: dict[str, Any]) -> AIResponse:
         """Parse and validate AI response."""

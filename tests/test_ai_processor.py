@@ -389,3 +389,180 @@ async def test_ai_processor_request_interval(
 
     assert len(fake_sleeper.calls) == 1  # One sleep between 2 articles
     assert fake_sleeper.calls[0] == 0.5  # Configured interval
+
+
+def _save_pending_articles(db: Database, n: int) -> list[Article]:
+    db.upsert_source(
+        SourceConfig(
+            key="test_source",
+            name="Test",
+            category="test",
+            fetch_method=FetchMethod.RSS,
+            base_url="https://example.com",
+        )
+    )
+    saved = []
+    for i in range(n):
+        article, _, _ = db.upsert_article(
+            Article(
+                source_key="test_source",
+                url=f"https://example.com/article-{i}",
+                normalized_url=f"https://example.com/article-{i}",
+                title=f"Article {i}",
+                summary=f"Summary {i}",
+                content=f"Content {i}",
+                published_at=datetime.now() - timedelta(hours=i),
+                category="test",
+            )
+        )
+        saved.append(article)
+    return saved
+
+
+def _get(db: Database, article_id: int) -> Article:
+    with db.connection() as conn:
+        row = conn.execute("SELECT * FROM articles WHERE id = ?", (article_id,)).fetchone()
+    return db._row_to_article(row)
+
+
+def _packed_response(entries: list[dict]) -> dict:
+    return {"choices": [{"message": {"content": json.dumps({"articles": entries})}}]}
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_processor_packed_one_request_per_pack(
+    temp_db: Database, ai_config: AIConfig, fake_sleeper
+):
+    """pack_size>1 sends several articles per request and saves each result."""
+    ai_config.pack_size = 2
+    ai_config.request_interval = 0.1
+    saved = _save_pending_articles(temp_db, 3)
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        user = payload["messages"][1]["content"]
+        ids = [a.id for a in saved if f"### id={a.id}\n" in user]
+        return httpx.Response(
+            200,
+            json=_packed_response(
+                [{"id": i, "title_ja": f"題{i}", "summary_ja": f"要約{i}"} for i in ids]
+            ),
+        )
+
+    route = respx.post("http://localhost:11434/v1/chat/completions").mock(side_effect=reply)
+
+    processor = AIProcessor(ai_config, temp_db, sleeper=fake_sleeper)
+    stats = await processor.enrich_articles(days=7, limit=10)
+
+    assert stats == {"skipped": 0, "success": 3, "failed": 0, "total": 3}
+    assert route.call_count == 2  # 3 articles / pack of 2
+    assert len(fake_sleeper.calls) == 1  # sleep between packs only
+
+    first = json.loads(route.calls[0].request.content)
+    assert first["max_tokens"] == ai_config.max_tokens * 2
+    assert first["response_format"]["type"] == "json_schema"
+    assert '"articles"' in first["messages"][0]["content"]
+
+    for article in saved:
+        updated = _get(temp_db, article.id)
+        assert updated.ai_status == "completed"
+        assert updated.title_ja == f"題{article.id}"
+        assert updated.summary_ja == f"要約{article.id}"
+        assert updated.ai_model == ai_config.model
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_processor_packed_missing_and_invalid_entries_fail_individually(
+    temp_db: Database, ai_config: AIConfig
+):
+    """Only articles missing from (or malformed in) the packed response are failed."""
+    ai_config.pack_size = 10
+    a, b, c = _save_pending_articles(temp_db, 3)
+    content = (
+        "```json\n"
+        + json.dumps(
+            {
+                "articles": [
+                    {"id": a.id, "title_ja": "題A", "summary_ja": "要約A"},
+                    {"id": b.id, "title_ja": "題B"},  # summary_ja missing
+                    {"id": 99999, "title_ja": "余分", "summary_ja": "余分"},
+                ]
+            }
+        )
+        + "\n```"
+    )
+    respx.post("http://localhost:11434/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+    )
+
+    processor = AIProcessor(ai_config, temp_db)
+    stats = await processor.enrich_articles(days=7, limit=10)
+
+    assert stats == {"skipped": 0, "success": 1, "failed": 2, "total": 3}
+    assert _get(temp_db, a.id).ai_status == "completed"
+    assert _get(temp_db, b.id).ai_status == "failed"
+    assert _get(temp_db, c.id).ai_status == "failed"
+    assert "Missing" in _get(temp_db, c.id).ai_error
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_processor_packed_invalid_json_fails_whole_pack(
+    temp_db: Database, ai_config: AIConfig
+):
+    """A response that is not JSON at all fails every article in the pack."""
+    ai_config.pack_size = 10
+    saved = _save_pending_articles(temp_db, 2)
+    respx.post("http://localhost:11434/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json={"choices": [{"message": {"content": "oops"}}]})
+    )
+
+    processor = AIProcessor(ai_config, temp_db)
+    stats = await processor.enrich_articles(days=7, limit=10)
+
+    assert stats == {"skipped": 0, "success": 0, "failed": 2, "total": 2}
+    for article in saved:
+        assert _get(temp_db, article.id).ai_status == "failed"
+
+
+def test_ai_processor_parse_packed_response_accepts_bare_list(ai_config: AIConfig):
+    processor = AIProcessor(ai_config, Database(":memory:"))
+    results = processor._parse_packed_response(
+        '[{"id": "7", "title_ja": "題", "summary_ja": "要約"}]'
+    )
+    assert results[7].title_ja == "題"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_select_endpoint_applies_pack_size(ai_config: AIConfig):
+    """pack_size/pack_max_tokens come from the selected endpoint; others default to 1."""
+    from news_crawler.config import AIEndpoint
+
+    ai_config.endpoints = [
+        AIEndpoint(name="local", proxy_url="http://local/v1", model="m1"),
+        AIEndpoint(
+            name="packed",
+            proxy_url="http://packed/v1",
+            model="m2",
+            pack_size=10,
+            pack_max_tokens=5000,
+        ),
+    ]
+    respx.get("http://local/v1/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "m1"}]})
+    )
+    respx.get("http://packed/v1/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "m2"}]})
+    )
+
+    processor = AIProcessor(ai_config, Database(":memory:"))
+    await processor.select_endpoint("packed")
+    assert processor.config.pack_size == 10
+    assert processor.config.pack_max_tokens == 5000
+
+    processor = AIProcessor(ai_config, Database(":memory:"))
+    await processor.select_endpoint("local")
+    assert processor.config.pack_size == 1

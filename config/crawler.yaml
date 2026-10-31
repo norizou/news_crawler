@@ -43,6 +43,7 @@ ai:
       api_key_env: LITELLM_API_KEY   # .env に LITELLM_API_KEY=... を書く（値は open-webui-stack/litellm.env の LITELLM_MASTER_KEY。.env は gitignore 済み）
       max_tokens: 1000
       reasoning_effort: ""        # gemini は reasoning_effort を送らない（外部API側の受理値が異なるため無効化）
+      pack_size: 10               # 10記事を1リクエストにまとめる（システムプロンプトの重複送信を減らしてコスト削減）。出力上限は max_tokens×件数
   # 下2行は endpoints 未使用時の単一エンドポイント設定（後方互換）
   proxy_url: "http://localhost:1234/v1"
   model: "google/gemma-4-e4b"

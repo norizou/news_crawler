@@ -59,6 +59,22 @@ class AIEndpoint(BaseModel):
         default=None,
         description="Override ai.reasoning_effort for this endpoint ('' = do not send)",
     )
+    pack_size: int | None = Field(
+        default=None,
+        description="Articles packed into one request (None/1 = one request per article)",
+    )
+    pack_max_tokens: int | None = Field(
+        default=None,
+        description="Max completion tokens for a packed request "
+        "(None = max_tokens x pack_size)",
+    )
+
+    @field_validator("pack_size")
+    @classmethod
+    def validate_pack_size(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("pack_size must be positive")
+        return v
 
 
 class AIConfig(BaseModel):
@@ -85,6 +101,14 @@ class AIConfig(BaseModel):
         default=None,
         description="OpenAI-compatible reasoning_effort sent in requests "
         "(e.g. 'none' disables thinking). None = do not send",
+    )
+    pack_size: int = Field(
+        default=1,
+        description="Articles packed into one request (1 = one request per article)",
+    )
+    pack_max_tokens: int | None = Field(
+        default=None,
+        description="Max completion tokens for a packed request (None = max_tokens x pack_size)",
     )
     endpoints: list[AIEndpoint] = Field(
         default_factory=list,
