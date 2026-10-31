@@ -157,6 +157,21 @@ class Database:
                     error TEXT
                 );
 
+                -- One row per LLM request (a request may cover a pack of articles)
+                CREATE TABLE IF NOT EXISTS ai_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TIMESTAMP NOT NULL,
+                    endpoint TEXT,
+                    model TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    job_name TEXT,
+                    request_key TEXT,
+                    article_ids TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL,
+                    output_tokens INTEGER NOT NULL,
+                    cost_usd REAL
+                );
+
                 CREATE TABLE IF NOT EXISTS ai_batch_items (
                     job_name TEXT NOT NULL,
                     article_id INTEGER NOT NULL,
@@ -183,6 +198,9 @@ class Database:
             ("ai_prompt_version", "TEXT DEFAULT '1'"),
             ("ai_processed_at", "TIMESTAMP"),
             ("ai_error", "TEXT"),
+            ("ai_input_tokens", "INTEGER"),
+            ("ai_output_tokens", "INTEGER"),
+            ("ai_cost_usd", "REAL"),
         ]
 
         existing_columns = {
@@ -745,8 +763,11 @@ class Database:
         model: str,
         prompt_version: str,
         input_hash: str,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        cost_usd: float | None = None,
     ) -> None:
-        """Save AI enrichment result for an article."""
+        """Save AI enrichment result for an article (with its share of token usage)."""
         processed_iso = datetime.now().isoformat()
         with self.connection() as conn:
             conn.execute(
@@ -759,7 +780,10 @@ class Database:
                     ai_model = ?,
                     ai_prompt_version = ?,
                     ai_processed_at = ?,
-                    ai_error = NULL
+                    ai_error = NULL,
+                    ai_input_tokens = ?,
+                    ai_output_tokens = ?,
+                    ai_cost_usd = ?
                 WHERE id = ?
                 """,
                 (
@@ -769,7 +793,45 @@ class Database:
                     model,
                     prompt_version,
                     processed_iso,
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
                     article_id,
+                ),
+            )
+
+    def record_ai_usage(
+        self,
+        *,
+        model: str,
+        mode: str,
+        article_ids: list[int],
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float | None,
+        endpoint: str | None = None,
+        job_name: str | None = None,
+        request_key: str | None = None,
+    ) -> None:
+        """Record one LLM request's exact token usage and cost."""
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_usage (created_at, endpoint, model, mode, job_name, request_key,
+                                      article_ids, input_tokens, output_tokens, cost_usd)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now().isoformat(),
+                    endpoint,
+                    model,
+                    mode,
+                    job_name,
+                    request_key,
+                    json.dumps(article_ids),
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
                 ),
             )
 
@@ -999,6 +1061,9 @@ class Database:
             ),
             ai_processed_at=ai_processed_at,
             ai_error=row["ai_error"] if "ai_error" in keys else None,
+            ai_input_tokens=row["ai_input_tokens"] if "ai_input_tokens" in keys else None,
+            ai_output_tokens=row["ai_output_tokens"] if "ai_output_tokens" in keys else None,
+            ai_cost_usd=row["ai_cost_usd"] if "ai_cost_usd" in keys else None,
             duplicate_of_id=(
                 row["duplicate_of_id"] if "duplicate_of_id" in keys else None
             ),

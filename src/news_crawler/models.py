@@ -100,6 +100,15 @@ class Article(BaseModel):
     ai_model: str = Field(default="", description="AI model used for processing")
     ai_prompt_version: str = Field(default="1", description="Prompt version used")
     ai_processed_at: datetime | None = Field(default=None, description="AI processing timestamp")
+    ai_input_tokens: int | None = Field(
+        default=None, description="Input tokens attributed to this article (None = not measured)"
+    )
+    ai_output_tokens: int | None = Field(
+        default=None, description="Output tokens attributed to this article"
+    )
+    ai_cost_usd: float | None = Field(
+        default=None, description="LLM cost attributed to this article in USD (None = no pricing)"
+    )
     ai_error: str | None = Field(default=None, description="AI processing error message")
     duplicate_of_id: int | None = Field(
         default=None, description="ID of the canonical article this duplicates, if any"

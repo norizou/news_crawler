@@ -153,6 +153,7 @@ npm run lint:fix
    - **思考モデルは `max_tokens` を大きくする**（gemma-4 は思考トークンも消費する。500 だと `content` が空になり全件 `Invalid AI response format` で失敗）。**思考を無効化するには `ai.reasoning_effort: "none"`**（2026/10/25 追加。要約用途ではこれで十分速い。エンドポイント別に `reasoning_effort` を上書き可能で、`""` 指定はパラメータ自体を送らない＝gemini 用）。
    - **`pack_size`（2026/10/31 追加）**: エンドポイント別に N 件を1リクエストにまとめる（`gemini` は 10）。応答は `{"articles":[{id,title_ja,summary_ja}]}` を json_schema で強制。欠けた id・不正要素はその記事だけ failed。`pack_size` 未設定（LM Studio 系）は1件1リクエストのまま。
    - **`--batch` / `enrich-collect`（2026/10/31 追加）**: `batch_api` を持つエンドポイントだけ。LiteLLM 1.106 は Gemini(AI Studio) の batch を中継できないため `gemini_batch.py` が `generativelanguage.googleapis.com` を直接叩く（`GEMINI_API_KEY`）。Batch では LiteLLM の `/models` 疎通確認をしない。投入中の記事は `ai_batch_jobs`/`ai_batch_items` で管理し `get_pending_articles` から除外。実 API は Operation 包みで `metadata.state = BATCH_STATE_*` を返す（`JOB_STATE_*` に正規化して保存。結果保存後は `COLLECTED`）。
+   - **トークン・料金の記録（2026/10/31 追加）**: リクエスト単位の実数を `ai_usage`、記事ごとの按分（最大剰余法で合計一致）を `articles.ai_input_tokens/ai_output_tokens/ai_cost_usd` に保存。単価はエンドポイントの `pricing`（Batch は `batch_discount` 倍）。digest の front matter に `llm_input_tokens`・`llm_output_tokens`・`llm_cost_usd`・`llm_cost_jpy`（`report.usd_jpy_rate`）・`llm_usage`（モデル別）を出す。本文には書かない。
    - 記録される `ai_model` は実際に使ったモデル。
    - **`ai.prompt_version` を上げると、旧バージョンで処理済みの記事も次回 `enrich` の対象になる**（`get_pending_articles` が `ai_prompt_version` の不一致を拾う）。`system_prompt` を変えたら必ず上げる。`--limit` 省略時は `ai.max_articles_per_run`。
    - LM Studio が一時的に応答しないと `400 Bad Request` で失敗することがある。`--retry-failed` で再試行する。

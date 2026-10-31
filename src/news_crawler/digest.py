@@ -68,6 +68,44 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
+def _llm_usage_properties(
+    done: list[Article], report_config: ReportConfig | None
+) -> dict[str, object]:
+    """Front-matter properties for LLM token usage and cost of the week's summaries.
+
+    Only articles whose usage was recorded count (older ones predate tracking),
+    so ``llm_usage_articles`` can be smaller than ``ai_summarized``.
+    """
+    measured = [a for a in done if a.ai_input_tokens is not None]
+    if not measured:
+        return {}
+    rate = report_config.usd_jpy_rate if report_config is not None else 150.0
+
+    def totals(arts: list[Article]) -> dict[str, object]:
+        costs = [a.ai_cost_usd for a in arts if a.ai_cost_usd is not None]
+        usd = round(sum(costs), 6) if costs else None
+        return {
+            "articles": len(arts),
+            "input_tokens": sum(a.ai_input_tokens or 0 for a in arts),
+            "output_tokens": sum(a.ai_output_tokens or 0 for a in arts),
+            "cost_usd": usd,
+            "cost_jpy": round(usd * rate, 2) if usd is not None else None,
+        }
+
+    by_model: dict[str, list[Article]] = defaultdict(list)
+    for a in measured:
+        by_model[a.ai_model or "unknown"].append(a)
+    total = totals(measured)
+    return {
+        "llm_usage_articles": total["articles"],
+        "llm_input_tokens": total["input_tokens"],
+        "llm_output_tokens": total["output_tokens"],
+        "llm_cost_usd": total["cost_usd"],
+        "llm_cost_jpy": total["cost_jpy"],
+        "llm_usage": {model: totals(arts) for model, arts in sorted(by_model.items())},
+    }
+
+
 def render_week(
     monday: date,
     articles: list[Article],
@@ -96,6 +134,7 @@ def render_week(
         "tags": ["keiba", "news", "weekly"],
         "llm_models": models,
     }
+    front.update(_llm_usage_properties(done, report_config))
 
     lines = [
         "---",

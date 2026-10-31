@@ -12,6 +12,7 @@ report:
   output_assets_name: "svg"
   wordcloud_width: 800
   wordcloud_height: 400
+  usd_jpy_rate: 150   # digest の llm_cost_jpy 換算レート（円/USD）
   ai_keywords_path: "config/keiba_keywords.yaml"
   sudachi_config_path: "config/sudachi.json"
   crowns_path: "config/keiba_crowns.csv"
@@ -49,6 +50,10 @@ ai:
         model: "gemini-2.5-flash-lite"
         api_key_env: GEMINI_API_KEY   # .env に GEMINI_API_KEY=...（値は open-webui-stack/litellm.env の GEMINI_API_KEY と同じ）
         poll_interval: 30
+      pricing:                    # 料金記録用の単価（USD / 100万トークン）。LiteLLM の単価表 2026/10 時点。Batch は batch_discount 倍
+        input_per_mtok: 0.10
+        output_per_mtok: 0.40
+        batch_discount: 0.5
   # 下2行は endpoints 未使用時の単一エンドポイント設定（後方互換）
   proxy_url: "http://localhost:1234/v1"
   model: "google/gemma-4-e4b"

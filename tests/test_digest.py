@@ -230,3 +230,41 @@ def test_get_latest_valid_article_date(tmp_path):
     latest = get_latest_valid_article_date(db, exclude_source_keys=["disabled_src"])
     assert latest == today.date()
 
+
+
+def test_render_week_llm_usage_properties():
+    import yaml
+
+    from news_crawler.config import ReportConfig
+
+    a = _art(
+        title_ja="題", summary_ja="要約", ai_status="completed", ai_model="gemini-x",
+        ai_input_tokens=1000, ai_output_tokens=200, ai_cost_usd=0.0002,
+    )
+    b = _art(
+        url="https://example.com/2", title_ja="題2", summary_ja="要約2",
+        ai_status="completed", ai_model="local", ai_input_tokens=500, ai_output_tokens=100,
+    )
+    old = _art(url="https://example.com/3", ai_status="completed", ai_model="local")  # unmeasured
+    out = render_week(
+        date(2026, 9, 14), [a, b, old], {"netkeiba": "netkeiba"},
+        report_config=ReportConfig(usd_jpy_rate=150),
+    )
+    front = yaml.safe_load(out.split("---")[1])
+
+    assert front["llm_usage_articles"] == 2
+    assert front["llm_input_tokens"] == 1500
+    assert front["llm_output_tokens"] == 300
+    assert front["llm_cost_usd"] == 0.0002
+    assert front["llm_cost_jpy"] == 0.03
+    assert front["llm_usage"]["gemini-x"] == {
+        "articles": 1, "input_tokens": 1000, "output_tokens": 200,
+        "cost_usd": 0.0002, "cost_jpy": 0.03,
+    }
+    assert front["llm_usage"]["local"]["cost_usd"] is None
+
+
+def test_render_week_omits_llm_usage_when_unmeasured():
+    done = _art(title_ja="題", summary_ja="要約", ai_status="completed", ai_model="m1")
+    out = render_week(date(2026, 9, 14), [done], {"netkeiba": "netkeiba"})
+    assert "llm_usage" not in out and "llm_cost_usd" not in out

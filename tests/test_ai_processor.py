@@ -566,3 +566,65 @@ async def test_select_endpoint_applies_pack_size(ai_config: AIConfig):
     processor = AIProcessor(ai_config, Database(":memory:"))
     await processor.select_endpoint("local")
     assert processor.config.pack_size == 1
+
+
+def test_split_sums_exactly():
+    from news_crawler.ai_processor import _split
+
+    assert _split(10, [1, 1, 1]) == [4, 3, 3]
+    assert sum(_split(1001, [7, 3, 5, 0])) == 1001
+    assert _split(5, [0, 0]) == [3, 2]
+    assert _split(0, []) == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_processor_packed_records_usage_and_cost(
+    temp_db: Database, ai_config: AIConfig
+):
+    """Packed usage is recorded per request and split over the articles."""
+    from news_crawler.config import ModelPricing
+
+    ai_config.pack_size = 10
+    ai_config.pricing = ModelPricing(input_per_mtok=0.10, output_per_mtok=0.40)
+    saved = _save_pending_articles(temp_db, 3)
+    response = _packed_response(
+        [{"id": a.id, "title_ja": "題", "summary_ja": "要約"} for a in saved]
+    )
+    response["usage"] = {"prompt_tokens": 1000, "completion_tokens": 301}
+    respx.post("http://localhost:11434/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=response)
+    )
+
+    await AIProcessor(ai_config, temp_db).enrich_articles(days=7, limit=10)
+
+    with temp_db.connection() as conn:
+        row = conn.execute("SELECT * FROM ai_usage").fetchone()
+    assert row["mode"] == "sync"
+    assert (row["input_tokens"], row["output_tokens"]) == (1000, 301)
+    assert row["cost_usd"] == pytest.approx((1000 * 0.10 + 301 * 0.40) / 1e6)
+    assert json.loads(row["article_ids"]) == [a.id for a in saved]
+
+    arts = [_get(temp_db, a.id) for a in saved]
+    assert sum(a.ai_input_tokens for a in arts) == 1000
+    assert sum(a.ai_output_tokens for a in arts) == 301
+    assert sum(a.ai_cost_usd for a in arts) == pytest.approx(row["cost_usd"])
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_ai_processor_single_records_tokens_without_pricing(
+    temp_db: Database, ai_config: AIConfig, aia_success_response: dict
+):
+    """Without pricing, tokens are recorded but cost stays empty."""
+    (article,) = _save_pending_articles(temp_db, 1)
+    aia_success_response["usage"] = {"prompt_tokens": 120, "completion_tokens": 40}
+    respx.post("http://localhost:11434/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=aia_success_response)
+    )
+
+    await AIProcessor(ai_config, temp_db).enrich_articles(days=7, limit=10)
+
+    updated = _get(temp_db, article.id)
+    assert (updated.ai_input_tokens, updated.ai_output_tokens) == (120, 40)
+    assert updated.ai_cost_usd is None

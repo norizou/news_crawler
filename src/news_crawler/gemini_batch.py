@@ -16,6 +16,8 @@ class BatchResult:
     key: str | None
     text: str | None = None
     error: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 @dataclass
@@ -103,15 +105,25 @@ def _parse_result(item: dict[str, Any]) -> BatchResult:
     if item.get("error"):
         err = item["error"]
         return BatchResult(key=key, error=str(err.get("message", err)))
-    candidates = (item.get("response") or {}).get("candidates") or []
+    response = item.get("response") or {}
+    usage = response.get("usageMetadata") or {}
+    tokens: dict[str, int | None] = {"input_tokens": None, "output_tokens": None}
+    if usage:
+        # Thinking tokens are billed as output
+        tokens = {
+            "input_tokens": int(usage.get("promptTokenCount") or 0),
+            "output_tokens": int(usage.get("candidatesTokenCount") or 0)
+            + int(usage.get("thoughtsTokenCount") or 0),
+        }
+    candidates = response.get("candidates") or []
     if not candidates:
-        return BatchResult(key=key, error="No candidates in response")
+        return BatchResult(key=key, error="No candidates in response", **tokens)
     parts = (candidates[0].get("content") or {}).get("parts") or []
     text = "".join(p.get("text", "") for p in parts)
     if not text:
         reason = candidates[0].get("finishReason", "empty")
-        return BatchResult(key=key, error=f"Empty response ({reason})")
-    return BatchResult(key=key, text=text)
+        return BatchResult(key=key, error=f"Empty response ({reason})", **tokens)
+    return BatchResult(key=key, text=text, **tokens)
 
 
 class GeminiBatchClient:

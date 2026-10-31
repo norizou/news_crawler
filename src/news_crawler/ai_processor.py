@@ -13,7 +13,12 @@ from pydantic import ValidationError
 
 from news_crawler.config import AIConfig, AIEndpoint
 from news_crawler.database import BATCH_FINAL_STATES, Database
-from news_crawler.gemini_batch import BatchStatus, GeminiBatchClient, build_request
+from news_crawler.gemini_batch import (
+    BatchResult,
+    BatchStatus,
+    GeminiBatchClient,
+    build_request,
+)
 from news_crawler.models import AIResponse, Article
 
 PACKED_PROMPT_SUFFIX = """\
@@ -119,6 +124,7 @@ class AIProcessor:
                 ),
                 "pack_size": ep.pack_size or 1,
                 "pack_max_tokens": ep.pack_max_tokens,
+                "pricing": ep.pricing,
             }
         )
         self._auth_env = ep.api_key_env
@@ -265,6 +271,8 @@ class AIProcessor:
                 except ValueError as e:
                     error = str(e)
 
+            shares = self._record_batch_usage(job, key, pack_items, current, result, parsed)
+
             for item in pack_items:
                 article = current.get(item["article_id"])
                 if article is None or self._compute_input_hash(article) != item["input_hash"]:
@@ -285,8 +293,32 @@ class AIProcessor:
                     model=job["model"],
                     prompt_version=job["prompt_version"],
                     input_hash=item["input_hash"],
+                    **shares.get(item["article_id"], {}),
                 )
                 stats["success"] += 1
+
+    def _record_batch_usage(
+        self,
+        job: dict[str, Any],
+        key: str,
+        pack_items: list[dict[str, Any]],
+        current: dict[int, Article],
+        result: BatchResult | None,
+        parsed: dict[int, AIResponse],
+    ) -> dict[int, dict[str, Any]]:
+        """Record a batch request's usage; returns per-article shares."""
+        if result is None or result.input_tokens is None:
+            return {}
+        articles = [current[i["article_id"]] for i in pack_items if i["article_id"] in current]
+        return self._record_usage(
+            articles,
+            parsed,
+            (result.input_tokens, result.output_tokens or 0),
+            mode="batch",
+            job_name=job["job_name"],
+            request_key=key,
+            model=job["model"],
+        )
 
     async def enrich_articles(
         self,
@@ -379,21 +411,29 @@ class AIProcessor:
         """Send one packed request and save each article's result. Returns (success, failed)."""
         try:
             response = await self._post_with_retry(self._build_packed_payload(pack))
-            content = response["choices"][0]["message"]["content"]
-            results = self._parse_packed_response(content)
         except Exception as e:
             for article in pack:
                 if article.id is not None:
                     self.db.save_ai_failure(article.id, str(e))
             return 0, len(pack)
 
+        usage = self._chat_usage(response)
+        try:
+            content = response["choices"][0]["message"]["content"]
+            results = self._parse_packed_response(content)
+        except Exception as e:
+            results, error = {}, str(e)
+        else:
+            error = "Missing from packed AI response"
+
+        shares = self._record_usage(pack, results, usage, mode="sync")
         success = 0
         for article in pack:
             if article.id is None:
                 continue
             ai_result = results.get(article.id)
             if ai_result is None:
-                self.db.save_ai_failure(article.id, "Missing from packed AI response")
+                self.db.save_ai_failure(article.id, error)
                 continue
             self.db.save_ai_result(
                 article_id=article.id,
@@ -402,9 +442,81 @@ class AIProcessor:
                 model=self.config.model,
                 prompt_version=self.config.prompt_version,
                 input_hash=self._compute_input_hash(article),
+                **shares.get(article.id, {}),
             )
             success += 1
         return success, len(pack) - success
+
+    @staticmethod
+    def _chat_usage(response: dict[str, Any]) -> tuple[int, int] | None:
+        """(input, output) tokens from an OpenAI-compatible response, if reported."""
+        usage = response.get("usage") or {}
+        if "prompt_tokens" not in usage:
+            return None
+        return int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
+
+    def _record_usage(
+        self,
+        articles: list[Article],
+        results: dict[int, AIResponse],
+        usage: tuple[int, int] | None,
+        *,
+        mode: str,
+        job_name: str | None = None,
+        request_key: str | None = None,
+        model: str | None = None,
+    ) -> dict[int, dict[str, Any]]:
+        """Record one request's usage and split it over its articles.
+
+        Input tokens are shared by input length over every article sent; output
+        tokens by generated length over the articles that got a result. Returns
+        {article_id: save_ai_result kwargs} for the articles with a result.
+        """
+        if usage is None:
+            return {}
+        input_tokens, output_tokens = usage
+        ids = [a.id for a in articles if a.id is not None]
+        batch = mode == "batch"
+        pricing = self.config.pricing
+        self.db.record_ai_usage(
+            endpoint=self.active_endpoint,
+            model=model or self.config.model,
+            mode=mode,
+            job_name=job_name,
+            request_key=request_key,
+            article_ids=ids,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=pricing.cost(input_tokens, output_tokens, batch=batch) if pricing else None,
+        )
+
+        input_share = dict(
+            zip(
+                ids,
+                _split(input_tokens, [len(self._prepare_input_text(a)) for a in articles]),
+                strict=True,
+            )
+        )
+        done = [i for i in ids if i in results]
+        output_share = dict(
+            zip(
+                done,
+                _split(
+                    output_tokens,
+                    [len(results[i].title_ja) + len(results[i].summary_ja) for i in done],
+                ),
+                strict=True,
+            )
+        )
+        shares = {}
+        for i in done:
+            tin, tout = input_share[i], output_share[i]
+            shares[i] = {
+                "input_tokens": tin,
+                "output_tokens": tout,
+                "cost_usd": pricing.cost(tin, tout, batch=batch) if pricing else None,
+            }
+        return shares
 
     def _is_up_to_date(self, article: Article) -> bool:
         """True if the article was already enriched from the same input, model and prompt."""
@@ -433,6 +545,9 @@ class AIProcessor:
 
         # Save result
         if article.id is not None:
+            shares = self._record_usage(
+                [article], {article.id: ai_result}, self._chat_usage(response), mode="sync"
+            )
             self.db.save_ai_result(
                 article_id=article.id,
                 title_ja=ai_result.title_ja,
@@ -440,6 +555,7 @@ class AIProcessor:
                 model=self.config.model,
                 prompt_version=self.config.prompt_version,
                 input_hash=input_hash,
+                **shares.get(article.id, {}),
             )
         return True
 
@@ -632,3 +748,17 @@ class AIProcessor:
 
         except (KeyError, IndexError, json.JSONDecodeError, ValidationError) as e:
             raise ValueError(f"Invalid AI response format: {e}")
+
+
+def _split(total: int, weights: list[int]) -> list[int]:
+    """Split an integer total proportionally to weights; parts sum exactly to total."""
+    if not weights:
+        return []
+    if sum(weights) <= 0:
+        weights = [1] * len(weights)
+    raw = [total * w / sum(weights) for w in weights]
+    parts = [int(r) for r in raw]
+    by_remainder = sorted(range(len(raw)), key=lambda i: raw[i] - parts[i], reverse=True)
+    for i in by_remainder[: total - sum(parts)]:
+        parts[i] += 1
+    return parts

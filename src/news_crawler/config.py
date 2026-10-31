@@ -43,6 +43,20 @@ class CrawlerConfig(BaseModel):
     output_dir: str = Field(default="output", description="Output directory for reports")
 
 
+class ModelPricing(BaseModel):
+    """Per-million-token prices (USD) used to record LLM cost."""
+
+    input_per_mtok: float = Field(description="USD per 1M input tokens")
+    output_per_mtok: float = Field(description="USD per 1M output tokens (incl. thinking)")
+    batch_discount: float = Field(
+        default=0.5, description="Multiplier applied to Batch API usage (0.5 = half price)"
+    )
+
+    def cost(self, input_tokens: int, output_tokens: int, *, batch: bool = False) -> float:
+        usd = (input_tokens * self.input_per_mtok + output_tokens * self.output_per_mtok) / 1e6
+        return usd * self.batch_discount if batch else usd
+
+
 class GeminiBatchConfig(BaseModel):
     """Gemini Batch API settings for `enrich --batch` (calls Google directly, not LiteLLM)."""
 
@@ -89,6 +103,9 @@ class AIEndpoint(BaseModel):
     batch_api: GeminiBatchConfig | None = Field(
         default=None, description="Enables `enrich --batch` for this endpoint"
     )
+    pricing: ModelPricing | None = Field(
+        default=None, description="Token prices for cost recording (None = tokens only)"
+    )
 
     @field_validator("pack_size")
     @classmethod
@@ -130,6 +147,9 @@ class AIConfig(BaseModel):
     pack_max_tokens: int | None = Field(
         default=None,
         description="Max completion tokens for a packed request (None = max_tokens x pack_size)",
+    )
+    pricing: ModelPricing | None = Field(
+        default=None, description="Token prices of the active endpoint (set from endpoints)"
     )
     endpoints: list[AIEndpoint] = Field(
         default_factory=list,
@@ -190,6 +210,9 @@ class ReportConfig(BaseModel):
     output_assets_name: str = Field(default="svg", description="Name of assets directory")
     wordcloud_width: int = Field(default=800, description="Word cloud width")
     wordcloud_height: int = Field(default=400, description="Word cloud height")
+    usd_jpy_rate: float = Field(
+        default=150.0, description="JPY per USD for llm_cost_jpy in digest front matter"
+    )
     ai_keywords_path: str = Field(
         default="config/ai_keywords.yaml", description="Path to AI keywords filter file"
     )

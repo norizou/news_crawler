@@ -72,6 +72,16 @@ def test_parse_status_normalizes_batch_state_prefix():
     assert status.results == []
 
 
+def test_parse_result_reads_usage_including_thoughts():
+    item = _response("{}", "pack-0000")
+    item["response"]["usageMetadata"] = {
+        "promptTokenCount": 900, "candidatesTokenCount": 250, "thoughtsTokenCount": 50
+    }
+    status = parse_status({"name": "b", "state": "JOB_STATE_SUCCEEDED",
+                           "dest": {"inlinedResponses": [item]}})
+    assert (status.results[0].input_tokens, status.results[0].output_tokens) == (900, 300)
+
+
 def test_parse_status_pending_without_results():
     status = parse_status({"name": "batches/3", "metadata": {"state": "JOB_STATE_PENDING"}})
     assert status.state == "JOB_STATE_PENDING"
@@ -217,6 +227,34 @@ async def test_collect_saves_results_and_closes_job(batch_processor, temp_db, fa
         assert done[article.id].ai_status == "completed"
         assert done[article.id].title_ja == f"題{article.id}"
         assert done[article.id].ai_model == "gemini-test"
+
+
+@pytest.mark.asyncio
+async def test_collect_records_batch_usage_at_discount(batch_processor, temp_db):
+    from news_crawler.config import ModelPricing
+
+    batch_processor.config.endpoints[1].pricing = ModelPricing(
+        input_per_mtok=0.10, output_per_mtok=0.40, batch_discount=0.5
+    )
+    saved = _save_articles(temp_db, 2)
+    await batch_processor.submit_batch(days=7, limit=10)
+    entries = [{"id": a.id, "title_ja": "題", "summary_ja": "要約"} for a in saved]
+    status = _status_for(batch_processor, "JOB_STATE_SUCCEEDED", {"pack-0000": entries})
+    status.results[0].input_tokens, status.results[0].output_tokens = 2000, 400
+    batch_processor.fake_client.statuses = [status]
+
+    await batch_processor.collect_batches()
+
+    with temp_db.connection() as conn:
+        row = conn.execute("SELECT * FROM ai_usage").fetchone()
+    expected = (2000 * 0.10 + 400 * 0.40) / 1e6 * 0.5
+    assert (row["mode"], row["job_name"], row["request_key"]) == (
+        "batch", "batches/job1", "pack-0000"
+    )
+    assert row["cost_usd"] == pytest.approx(expected)
+    arts = temp_db.get_articles_by_ids([a.id for a in saved])
+    assert sum(a.ai_input_tokens for a in arts.values()) == 2000
+    assert sum(a.ai_cost_usd for a in arts.values()) == pytest.approx(expected)
 
 
 @pytest.mark.asyncio
