@@ -511,3 +511,27 @@ npm run lint
    - データ件数が数十万件規模に拡大した場合、`database.py` の Repository インターフェースを維持したまま PostgreSQL / pgvector へシームレスに移行可能。
 2. **Slack / Teams 通知**:
    - 週次レポート生成時に Webhook 経由で要約サマリーを自動ポストする通知機能の追加。
+
+---
+
+## 7. TODO・今後の課題
+
+### 7.1 複数ジャンル対応（2026-10-31 登録・未着手）
+
+競馬以外のジャンル（AI・技術ニュースなど）も同じクローラーで集め、ジャンルごとに使い分ける。**ブランチでは分けず、設定ディレクトリ（`--config-dir`）で分ける**方針（ブランチで分けると `main` と `mac-local` のように修正の取り込みがずれていくため）。
+
+- 前提: 全 CLI コマンド（crawl・enrich・enrich-collect・digest・report・search・dedupe・stats・list-sources・export-comments）が `--config-dir` に対応済み。指定ディレクトリの `crawler.yaml` と `sources.yaml` を読む。
+- 構成案:
+  ```
+  config/keiba/  crawler.yaml（DB=data/keiba.db、出力=Vault の 10_KEIBA/10_News_crawl）+ sources.yaml
+  config/<genre>/ crawler.yaml（DB=data/<genre>.db、出力=Vault の別フォルダ）+ sources.yaml
+  uv run news-crawler crawl --config-dir config/<genre>
+  ```
+
+やること:
+
+- [ ] `digest.py` の決め打ちを設定から読むようにする（128行目付近のタイトル「競馬ニュース」、タグ `keiba`、本文の書き出し「の競馬ニュース」）。`report.title` / `title_template` / `tags` の仕組みは既にある
+- [ ] ジャンルごとに `crawler.yaml` で別の `database_path`・`report.output_dir`・`system_prompt`・`ai_keywords_path`・`sudachi_config_path`・`crowns_path` を指定する。パスは実行ディレクトリ基準なので、書き分けないと競馬の DB に混ざる
+- [ ] 競馬専用機能（`export-comments` の TARGET 出力、競馬の用語辞書・冠名 CSV）を他ジャンルで無効化・空にできることを確認する
+- [ ] 競馬の設定を `config/keiba/` に移すか、`config/` を競馬のまま残すかを決める（移す場合は Vault のスキル `news-crawler`・週末ルーティンのコマンドも更新）
+- [ ] 追加するジャンルとソース候補を決める（4.4 の「将来の拡張候補ソース一覧」が使える）
