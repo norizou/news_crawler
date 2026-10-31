@@ -74,6 +74,11 @@ class AIProcessor:
                         "proxy_url": ep.proxy_url,
                         "model": ep.model,
                         "max_tokens": ep.max_tokens or cfg.max_tokens,
+                        "reasoning_effort": (
+                            ep.reasoning_effort
+                            if ep.reasoning_effort is not None
+                            else cfg.reasoning_effort
+                        ),
                     }
                 )
                 self._auth_env = ep.api_key_env
@@ -206,6 +211,8 @@ class AIProcessor:
             "max_tokens": self.config.max_tokens,
             "temperature": 0.3,
         }
+        if self.config.reasoning_effort:
+            payload["reasoning_effort"] = self.config.reasoning_effort
 
         last_error: Exception | None = None
         for attempt in range(self.config.max_retries + 1):

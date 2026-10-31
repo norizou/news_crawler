@@ -31,14 +31,18 @@ ai:
     - name: lmstudio_12b_full   # ローカル常駐のフル精度版。qat（LM Link経由のリモート機）が不安定なときの最終フォールバック
       proxy_url: "http://localhost:1234/v1"
       model: "google/gemma-4-12b"
+    - name: lmstudio_e4b_mlx   # MLX版e4b（LM Studioにロードされている方。既定の順序には入れない）
+      proxy_url: "http://localhost:1234/v1"
+      model: "gemma-4-e4b-it-mlx"
     - name: lmstudio_192_168_1_3   # 別マシン(192.168.1.3)のLM Studio。既定の順序には入れない（使うとき: enrich --llm lmstudio_192_168_1_3）
       proxy_url: "http://192.168.1.3:1234/v1"
       model: "google/gemma-4-12b-qat"
     - name: gemini            # 既定の順序には入れない（外部送信・従量課金のため --llm gemini で明示指定）
-      proxy_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+      proxy_url: "http://localhost:4000/v1"   # LiteLLMプロキシ経由がこの環境の正規経路（open-webui-stack 側が本物のGEMINI_API_KEYを保持）
       model: "gemini-2.5-flash-lite"
-      api_key_env: GEMINI_API_KEY   # .env に GEMINI_API_KEY=... を書く（.env は gitignore 済み）
+      api_key_env: LITELLM_API_KEY   # .env に LITELLM_API_KEY=... を書く（値は open-webui-stack/litellm.env の LITELLM_MASTER_KEY。.env は gitignore 済み）
       max_tokens: 1000
+      reasoning_effort: ""        # gemini は reasoning_effort を送らない（外部API側の受理値が異なるため無効化）
   # 下2行は endpoints 未使用時の単一エンドポイント設定（後方互換）
   proxy_url: "http://localhost:1234/v1"
   model: "google/gemma-4-e4b"
@@ -47,19 +51,20 @@ ai:
   max_retries: 3
   max_input_chars: 8000
   max_articles_per_run: 50
-  max_tokens: 3000  # gemma-4 は思考トークンも消費するため大きめに
-  prompt_version: "1"
+  max_tokens: 3000  # reasoning_effort 無効時は gemma-4 の思考トークンも消費するため大きめに
+  reasoning_effort: "none"  # 要約処理では思考をオフ（高速化）。空文字のエンドポイントには送らない
+  prompt_version: "2"
   system_prompt: |
     You are a professional translator and summarizer. Your task is to process the provided article and output a JSON object with the following structure:
 
     {
       "title_ja": "Japanese translation of the article title",
-      "summary_ja": "Japanese summary of the article content (2-3 sentences)"
+      "summary_ja": "Japanese summary of the article content (5-6 sentences)"
     }
 
     Important guidelines:
     - Translate the title accurately to Japanese
-    - Create a concise summary in Japanese (2-3 sentences)
+    - Create a summary in Japanese (5-6 sentences)
     - If the article is already in Japanese, still provide a refined Japanese summary
     - Output ONLY the JSON object, no additional text
     - Ensure the JSON is valid and properly formatted

@@ -142,6 +142,36 @@ stopwords_general:
     assert svg_file.exists()
 
 
+def test_write_digests_wordcloud_includes_ai_summary(tmp_path):
+    """AI-generated title_ja/summary_ja must feed the wordcloud frequencies.
+
+    The whitelisted term 秋華賞 appears only in the _ja fields; if the analyzer
+    input stayed original-only, freq would be empty and no SVG generated.
+    """
+    keywords_file = tmp_path / "test_keywords.yaml"
+    keywords_file.write_text("""
+ai_keywords:
+  - 秋華賞
+""", encoding="utf-8")
+
+    art = _art(
+        title="Shuka Sho Preview",
+        summary="English-only preview text.",
+        content="English-only body text.",
+        title_ja="秋華賞プレビュー",
+        summary_ja="秋華賞に有力馬が出走する。",
+        ai_status="completed",
+        ai_model="m1",
+    )
+    cfg = ReportConfig(visualize=True, ai_keywords_path=str(keywords_file))
+    written, _ = write_digests([art], tmp_path, {}, report_config=cfg)
+    assert len(written) == 1
+    md_path, _ = written[0]
+    content = md_path.read_text(encoding="utf-8")
+    assert "![ワードクラウド](svg/digest_2026-W38_wordcloud.svg)" in content
+    assert (tmp_path / "2026" / "svg" / "digest_2026-W38_wordcloud.svg").exists()
+
+
 def test_get_latest_valid_article_date(tmp_path):
     """Test get_latest_valid_article_date handles ISO 'T' timestamps,
     future dates, and disabled sources.

@@ -524,3 +524,114 @@ def test_cli_crawl_no_update_digest_flag(cli_config_dir: Path, tmp_path: Path):
     assert "Updating current week's digest and wordcloud" not in res.output
     out_dir = tmp_path / "output"
     assert list(out_dir.glob("*/digest_*.md")) == []
+
+
+def _write_enrich_config(cli_config_dir: Path, tmp_path: Path) -> Path:
+    """Write a crawler.yaml that enables enrichment against a mock LLM endpoint."""
+    keywords_file = tmp_path / "kw.yaml"
+    keywords_file.write_text("ai_keywords:\n  - 秋華賞\n", encoding="utf-8")
+    (cli_config_dir / "crawler.yaml").write_text(
+        f"""
+crawler:
+  download_delay: 0.0
+  database_path: "{tmp_path / 'cli_test.db'}"
+  output_dir: "{tmp_path / 'output'}"
+
+report:
+  visualize: true
+  ai_keywords_path: "{keywords_file}"
+
+ai:
+  enabled: true
+  proxy_url: "https://llm.example.com/v1"
+  model: "test-model"
+  request_interval: 0.0
+""",
+        encoding="utf-8",
+    )
+    return keywords_file
+
+
+def _insert_pending_article(cli_config_dir: Path) -> None:
+    """Insert one pending article into the CLI test database."""
+    from datetime import datetime
+
+    from news_crawler.config import load_config
+    from news_crawler.database import Database
+    from news_crawler.models import Article, FetchMethod, SourceConfig
+
+    app_config = load_config(cli_config_dir)
+    db = Database(app_config.crawler.database_path)
+    db.upsert_source(SourceConfig(
+        key="sample_rss", name="Sample RSS", category="official",
+        fetch_method=FetchMethod.RSS, base_url="https://example.com",
+    ))
+    db.upsert_article(Article(
+        source_key="sample_rss",
+        url="https://example.com/keiba-news",
+        normalized_url="https://example.com/keiba-news",
+        title="Shuka Sho Preview",
+        summary="English-only preview text.",
+        content="English-only body text.",
+        published_at=datetime.now(),
+        category="official",
+    ))
+
+
+def _mock_llm_completion() -> None:
+    respx.post("https://llm.example.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"title_ja": "秋華賞プレビュー",'
+                                ' "summary_ja": "秋華賞に有力馬が出走する。"}'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+
+@respx.mock
+def test_cli_enrich_auto_updates_digest(cli_config_dir: Path, tmp_path: Path):
+    """Test that enrich updates affected weeks' digests and wordcloud SVGs."""
+    _write_enrich_config(cli_config_dir, tmp_path)
+    _insert_pending_article(cli_config_dir)
+    _mock_llm_completion()
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["enrich", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+    assert "Success: 1" in res.output
+    assert "Updating weekly digests and wordcloud" in res.output
+
+    out_dir = tmp_path / "output"
+    digest_files = list(out_dir.glob("*/digest_*.md"))
+    assert len(digest_files) == 1
+    md_text = digest_files[0].read_text(encoding="utf-8")
+    assert "秋華賞プレビュー" in md_text
+    # 秋華賞 exists only in AI-generated text — the SVG proves it fed the analyzer
+    svg_files = list(out_dir.glob("*/svg/*_wordcloud.svg"))
+    assert len(svg_files) == 1
+
+
+@respx.mock
+def test_cli_enrich_no_update_digest_flag(cli_config_dir: Path, tmp_path: Path):
+    """Test that enrich --no-update-digest skips digest and wordcloud generation."""
+    _write_enrich_config(cli_config_dir, tmp_path)
+    _insert_pending_article(cli_config_dir)
+    _mock_llm_completion()
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["enrich", "--no-update-digest", "--config-dir", str(cli_config_dir)])
+    assert res.exit_code == 0
+    assert "Success: 1" in res.output
+    assert "Updating weekly digests and wordcloud" not in res.output
+    out_dir = tmp_path / "output"
+    assert list(out_dir.glob("*/digest_*.md")) == []

@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from news_crawler.ai_processor import AIProcessor
-from news_crawler.config import load_config
+from news_crawler.config import AppConfig, load_config
 from news_crawler.coordinator import CrawlCoordinator
 from news_crawler.database import Database
 from news_crawler.dedupe import DEFAULT_MIN_TITLE_LEN, run_dedupe
@@ -24,6 +24,40 @@ console = Console()
 @click.version_option(version="0.1.0", prog_name="news-crawler")
 def main() -> None:
     """News Scraping System CLI."""
+
+
+def _refresh_weekly_digests(app_config: AppConfig, *, days: int | None = None) -> None:
+    """Rewrite affected weekly digests (incl. wordcloud SVGs) after data changes.
+
+    With ``days=None`` the update window is anchored to the latest article's
+    published date (used after ``crawl``). ``days=N`` covers the trailing N-day
+    window expanded to ISO week boundaries (used after ``enrich``, matching its
+    scan window).
+    """
+    db = Database(app_config.crawler.database_path)
+    try:
+        disabled = [k for k, src in app_config.sources.items() if not src.enabled]
+        start_d = end_d = None
+        if days is None:
+            latest_date = get_latest_valid_article_date(
+                db, exclude_source_keys=disabled or None
+            )
+            if latest_date is not None:
+                start_d = (latest_date - timedelta(days=6)).isoformat()
+                end_d = latest_date.isoformat()
+
+        written, _, _ = run_digest_update(
+            app_config,
+            db,
+            days=days,
+            start_date=start_d,
+            end_date=end_d,
+            dedupe_first=True,
+        )
+        for path, n in written:
+            console.print(f"  [green]Updated:[/green] {path} ({n} articles)")
+    except Exception as e:
+        console.print(f"[yellow]Warning: Failed to update digest/wordcloud:[/yellow] {e}")
 
 
 @main.command()
@@ -107,31 +141,7 @@ def crawl(
 
     if not dry_run and update_digest:
         console.print("[cyan]Updating current week's digest and wordcloud...[/cyan]")
-        db = Database(app_config.crawler.database_path)
-        try:
-            disabled = [k for k, src in app_config.sources.items() if not src.enabled]
-            latest_date = get_latest_valid_article_date(
-                db, exclude_source_keys=disabled or None
-            )
-
-            start_d = None
-            end_d = None
-            if latest_date is not None:
-                start_d = (latest_date - timedelta(days=6)).isoformat()
-                end_d = latest_date.isoformat()
-
-            written, skipped, _ = run_digest_update(
-                app_config,
-                db,
-                days=None,
-                start_date=start_d,
-                end_date=end_d,
-                dedupe_first=True,
-            )
-            for path, n in written:
-                console.print(f"  [green]Updated:[/green] {path} ({n} articles)")
-        except Exception as e:
-            console.print(f"[yellow]Warning: Failed to update digest/wordcloud:[/yellow] {e}")
+        _refresh_weekly_digests(app_config)
 
 
 @main.command()
@@ -324,6 +334,11 @@ def report(
     help="Path to custom sources configuration YAML file.",
 )
 @click.option(
+    "--update-digest/--no-update-digest",
+    default=True,
+    help="Update affected weeks' digests and wordcloud after enriching (default: True).",
+)
+@click.option(
     "--config-dir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default="config",
@@ -335,6 +350,7 @@ def enrich(
     retry_failed: bool,
     llm: str | None,
     sources_file: Path | None,
+    update_digest: bool,
     config_dir: Path,
 ) -> None:
     """Enrich articles with AI-generated Japanese title and summary."""
@@ -384,6 +400,10 @@ def enrich(
     console.print(f"  Success: [green]{stats['success']}[/green]")
     console.print(f"  Failed: [red]{stats['failed']}[/red]")
     console.print(f"  Skipped: {stats['skipped']}")
+
+    if update_digest and stats["success"] > 0:
+        console.print("[cyan]Updating weekly digests and wordcloud...[/cyan]")
+        _refresh_weekly_digests(app_config, days=days)
 
 
 @main.command()

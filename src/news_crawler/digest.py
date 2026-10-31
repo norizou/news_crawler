@@ -77,7 +77,7 @@ def render_week(
     report_config: ReportConfig | None = None,
     only_summarized: bool = False,
 ) -> str:
-    """Render one week's articles as Markdown with original word cloud and daily breakdown."""
+    """Render one week's articles as Markdown with word cloud and daily breakdown."""
     sunday = monday + timedelta(days=6)
     iso_year, iso_week, _ = monday.isocalendar()
     wk_str = f"{iso_year}-W{iso_week:02d}"
@@ -107,7 +107,7 @@ def render_week(
         "",
     ]
 
-    # Word cloud section (original text only)
+    # Word cloud section (original + AI-summary text)
     if output_path is not None and report_config is not None and report_config.visualize:
         wc_lines = render_wordcloud_section(items, output_path, report_config)
         if wc_lines:

@@ -55,6 +55,10 @@ class AIEndpoint(BaseModel):
     max_tokens: int | None = Field(
         default=None, description="Override ai.max_tokens for this endpoint"
     )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="Override ai.reasoning_effort for this endpoint ('' = do not send)",
+    )
 
 
 class AIConfig(BaseModel):
@@ -76,6 +80,11 @@ class AIConfig(BaseModel):
     max_tokens: int = Field(
         default=500,
         description="Max completion tokens (reasoning models need more, incl. thinking tokens)",
+    )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="OpenAI-compatible reasoning_effort sent in requests "
+        "(e.g. 'none' disables thinking). None = do not send",
     )
     endpoints: list[AIEndpoint] = Field(
         default_factory=list,

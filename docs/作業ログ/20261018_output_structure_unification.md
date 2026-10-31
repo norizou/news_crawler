@@ -5,8 +5,6 @@ author: Devin
 branch: mac-local
 ---
 
-# news_crawler 出力フォルダ構成統一・週次ダイジェスト正本一本化 作業ログ
-
 ## 1. 背景と課題
 
 これまで競馬ニュース収集システム `news_crawler` の出力は以下の二本立てとなっており、Vault（`10_KEIBA/10_News_crawl/`）側での管理において複数の課題が生じていた。
@@ -43,10 +41,10 @@ branch: mac-local
 ### (4) `src/news_crawler/digest.py`
 - **月曜始まり週ヘルパー**: `week_monday(d)`, `week_id(d)`, `group_by_week(articles)` を実装。
 - **`render_week()`**:
-  - Front matter: `title: 競馬ニュース YYYY-Www (YYYY-MM-DD ~ YYYY-MM-DD)`, `week`, `week_start`, `week_end`, `total_articles`, `ai_summarized`, `tags: [keiba, news, weekly]`, `llm_models`
+  - Front matter: `title: 競馬ニュース YYYY-Www (YYYY-MM-DD ~ YYYY-MM-DD)`・`week`・`week_start`・`week_end`・`total_articles`・`ai_summarized`・`tags: [keiba, news, weekly]`・`llm_models`
   - `## 📈 単語頻度分析`: `render_wordcloud_section()` で生成された `svg/digest_YYYY-Www_wordcloud.svg` へのリンク
   - `## 📊 収集サマリー`: カテゴリ別・ソース別の記事数テーブル（旧 weekly_report より統合）
-  - 週内詳細: 日付降順（`## YYYY-MM-DD（曜）（N 件）`）→ ソース別（`### ソース名（件数）`）→ 時刻降順（`- **HH:MM** [タイトル](URL)` + `  - 要約`）
+  - 週内詳細: 日付降順（`## YYYY-MM-DD（曜）（N 件）`）→ ソース別（`### ソース名（件数）`）→ 時刻降順（`- **HH:MM** [タイトル](URL)` + インデント付き子行 `- 要約`）
 - **`write_digests()`**: `<root>/<iso_year>/digest_<iso_year>-W<iso_week:02d>.md` に出力。範囲外週は断片上書き防止のためスキップ。
 
 ### (5) `src/news_crawler/cli.py`
@@ -59,7 +57,7 @@ branch: mac-local
 ## 4. データ移行・整理作業
 
 1. **要約サルベージ**:
-   - 再クロールで本文ハッシュが変わり DB 上で `ai_status='pending'` にリセットされていた `keibalab` 6記事（2026-10-16・10-17、id 1699, 1700, 1701, 1806, 1807, 1808）の AI 要約を既存日別 Markdown から抽出し、DB（`data/articles.db`）へ復元。
+   - 再クロールで本文ハッシュが変わり DB 上で `ai_status='pending'` にリセットされていた `keibalab` 6記事（2026-10-16・10-17、id 1699・1700・1701・1806・1807・1808）の AI 要約を既存日別 Markdown から抽出し、DB（`data/articles.db`）へ復元。
 2. **週次ダイジェスト再生成**:
    - `uv run news-crawler digest --start-date 2026-09-12 --end-date 2026-10-18 --visualize` を実行。
    - 2026-09-07 〜 2026-10-18 の全記事を網羅する 6 週間分（`digest_2026-W37.md` 〜 `digest_2026-W42.md`）と対応するワードクラウド SVG（6枚）を生成。

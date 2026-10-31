@@ -45,14 +45,15 @@ uv run news-crawler crawl --source netkeiba
 # dry-run (DB保存なし・ダイジェスト更新なし)
 uv run news-crawler crawl --dry-run
 
-# AI翻訳・要約 (config/crawler.yamlでai.enabled: true)
+# AI翻訳・要約 (config/crawler.yamlでai.enabled: true。
+# 成功時は --days 範囲を含む週のダイジェスト・ワードクラウドSVGも自動更新。--no-update-digest で無効化)
 uv run news-crawler enrich --days 7 --limit 50
 
 # 失敗した記事を再試行
 uv run news-crawler enrich --days 7 --retry-failed
 
 # LLM を1つに固定（既定は ai.endpoint_order の先頭から自動選択）
-uv run news-crawler enrich --llm gemini   # 要 .env の GEMINI_API_KEY
+uv run news-crawler enrich --llm gemini   # 要 .env の LITELLM_API_KEY（LiteLLM経由）
 
 # レポート生成（sources.yaml で enabled: false のソースは既定で自動除外。
 # タイトル・タグは sources.yaml または --title, --tags で柔軟に指定可。
@@ -64,7 +65,7 @@ uv run news-crawler report --sources-file config/sources.ai.yaml --title "AI Tre
 # クロスソース重複記事の検出（既定はdry-run。--applyでDB反映）
 uv run news-crawler dedupe --period month --apply
 
-# 【正本】週次ダイジェスト（収集サマリー表＋原文ワードクラウドSVG＋AI要約統合版）→ <report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md（月曜始まり・冪等上書き）
+# 【正本】週次ダイジェスト（収集サマリー表＋ワードクラウドSVG(原文＋AI要約)＋AI要約統合版）→ <report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md（月曜始まり・冪等上書き）
 uv run news-crawler digest --start-date 2026-09-18 --end-date 2026-09-18
 uv run news-crawler digest --days 7 --only-summarized
 
@@ -144,8 +145,8 @@ npm run lint:fix
 4. **AI 要約（`enrich`）の LLM 選択**:
    - `ai.endpoint_order`（既定: `lmstudio_12b` → `lmstudio_local` → `lmstudio_12b_full`）を先頭から試し、`/models` に応答し対象モデルがロード済みの最初のエンドポイントを使う。`--llm NAME` はその1つだけを使う。
    - `lmstudio_12b`（`gemma-4-12b-qat`）は LM Link 経由のリモート機モデルで、`/models` に出たり消えたりすることがある。不在時はローカル常駐の `lmstudio_12b_full`（`gemma-4-12b`、フル精度）へ自動フォールバックする（2026/10/14 追加）。
-   - `gemini` は外部送信・従量課金のため既定の順序に入れない。キーは `.env` の `GEMINI_API_KEY`（Git に入れない）。
-   - **思考モデルは `max_tokens` を大きくする**（gemma-4 は思考トークンも消費する。500 だと `content` が空になり全件 `Invalid AI response format` で失敗）。
+   - `gemini` は外部送信・従量課金のため既定の順序に入れない。**正規経路は LiteLLM プロキシ（`localhost:4000`、open-webui-stack）経由**で、本物の `GEMINI_API_KEY` は `open-webui-stack/litellm.env` が保持する。news_crawler 側は `.env` の `LITELLM_API_KEY`（LiteLLM マスター/仮想キー、Git に入れない）で認証する。
+   - **思考モデルは `max_tokens` を大きくする**（gemma-4 は思考トークンも消費する。500 だと `content` が空になり全件 `Invalid AI response format` で失敗）。**思考を無効化するには `ai.reasoning_effort: "none"`**（2026/10/25 追加。要約用途ではこれで十分速い。エンドポイント別に `reasoning_effort` を上書き可能で、`""` 指定はパラメータ自体を送らない＝gemini 用）。
    - 記録される `ai_model` は実際に使ったモデル。
    - **`ai.prompt_version` を上げると、旧バージョンで処理済みの記事も次回 `enrich` の対象になる**（`get_pending_articles` が `ai_prompt_version` の不一致を拾う）。`system_prompt` を変えたら必ず上げる。`--limit` 省略時は `ai.max_articles_per_run`。
    - LM Studio が一時的に応答しないと `400 Bad Request` で失敗することがある。`--retry-failed` で再試行する。
@@ -157,7 +158,7 @@ npm run lint:fix
 6. **週次ダイジェスト（`digest`）は月曜始まりの1週間単位で丸ごと書く冪等な出力**:
    - 出力先は `<report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md`（ISO週番号）。同じ週に何度実行しても該当週の1ファイルに上書きアップデートされ、ファイルは増えない。
    - 指定期間は自動的に月曜 00:00 〜 日曜 23:59 の週境界へ拡張して取得するため、週の途中実行でも週前半の記事が消えることはない。
-   - ワードクラウドは原文のみ1枚（`svg/digest_<YYYY>-W<ww>_wordcloud.svg`）を生成して Markdown からリンク参照する。
+   - ワードクラウドは原文＋AI要約テキストから1枚（`svg/digest_<YYYY>-W<ww>_wordcloud.svg`）を生成して Markdown からリンク参照する。`crawl` と `enrich`（成功時）の両方で対象週が自動再生成される。
    - 範囲の外の週に振り分けられた記事は書き出さない（既存の完全版ファイルを断片で上書きしないため）。試すときは `-o /tmp/...` で別の場所に出す。
    - **既知の不具合**: 公開日が未来になった記事（例: id 311・競馬ラボ・2028-08-09）はどの週にも入らない。原因未調査。
 

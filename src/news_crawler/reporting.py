@@ -72,7 +72,7 @@ def render_wordcloud_section(
     output_md_path: str | Path,
     report_config: ReportConfig | None = None,
 ) -> list[str]:
-    """Generate original-text word cloud SVG and return Markdown section lines."""
+    """Generate word cloud SVG from original + AI-summary text; return Markdown lines."""
     cfg = report_config or ReportConfig()
     if not cfg.visualize or not articles:
         return []
@@ -88,8 +88,11 @@ def render_wordcloud_section(
     )
     viz = VisualizationGenerator(font_path=cfg.japanese_font_path)
 
-    orig_texts = [f"{a.title} {a.summary} {a.content}" for a in articles]
-    freq = analyzer.analyze_japanese(orig_texts) or analyzer.analyze_english(orig_texts)
+    texts = [
+        f"{a.title} {a.title_ja} {a.summary} {a.summary_ja} {a.content}"
+        for a in articles
+    ]
+    freq = analyzer.analyze_japanese(texts) or analyzer.analyze_english(texts)
 
     lines: list[str] = ["## 📈 単語頻度分析", ""]
     if freq:

@@ -16,8 +16,8 @@
 - **SQLite + FTS5 全文検索**: 高速なローカル全文検索により、馬名や騎手名での横断検索が可能。
 - **柔軟な設定管理**: `config/sources.yaml` で対象ソース・セレクター・取得頻度を一元管理。
 - **日時は JST に統一**: `published_at` は取り込み時にすべて naive JST で保存します（UTC 表記のソースも変換）。旧データは `scripts/normalize_published_at.py --apply` で一度だけ変換します。
-- **週次ダイジェスト【正本】**: 月曜始まりの1週間単位で記事をまとめ、収集サマリー表・原文ワードクラウドSVG・AI要約一覧を1本に統合した Markdown を `<年>/digest_<YYYY>-W<ww>.md` として出力（`digest`）。上書きアップデート方式により週の正本ファイルが1本で完結します。
-- **Markdownレポート出力**: カテゴリ別・ソース別の新着記事サマリーおよび原文ワードクラウドSVG画像を自動生成（`<年>/weekly_report_YYYYMMDD.md`）。
+- **週次ダイジェスト【正本】**: 月曜始まりの1週間単位で記事をまとめ、収集サマリー表・ワードクラウドSVG（原文＋AI要約）・AI要約一覧を1本に統合した Markdown を `<年>/digest_<YYYY>-W<ww>.md` として出力（`digest`）。上書きアップデート方式により週の正本ファイルが1本で完結します。
+- **Markdownレポート出力**: カテゴリ別・ソース別の新着記事サマリーおよびワードクラウドSVG画像（原文＋AI要約）を自動生成（`<年>/weekly_report_YYYYMMDD.md`）。
 
 ---
 
@@ -105,8 +105,7 @@ uv run news-crawler crawl --dry-run
 ```
 
 > **クロール時のダイジェスト自動更新**:
-> クロール完了後、直近7日間のクロスソース重複判定（`dedupe`）が自動適用され、当週（週またぎ時は前週を含む）の週次ダイジェスト Markdown（`<年>/digest_<YYYY>-W<ww>.md`）および原文ワードクラウド SVG が最新データで自動更新されます。これにより、日常のクロール実行だけで常に最新の週次ダイジェストとワードクラウドが生成されます。
-
+> クロール完了後、直近7日間のクロスソース重複判定（`dedupe`）が自動適用され、当週（週またぎ時は前週を含む）の週次ダイジェスト Markdown（`<年>/digest_<YYYY>-W<ww>.md`）およびワードクラウド SVG（原文＋AI要約）が最新データで自動更新されます。これにより、日常のクロール実行だけで常に最新の週次ダイジェストとワードクラウドが生成されます。
 
 ### 現在の登録ソース一覧（有効8 + 無効3 = 計11サイト）
 
@@ -183,7 +182,7 @@ uv run news-crawler report --period month --exclude-source some_other_source
 uv run news-crawler report --period month --exclude-duplicates
 ```
 
-「原文」ワードクラウドは、まず SudachiPy による日本語の形態素解析を試み、結果が空の場合のみ英数字抽出にフォールバックします。日本語フォントは `_detect_japanese_font()` が代表的なインストールパスを自動探索し、見つからない場合は matplotlib が認識済みのフォント一覧から CJK 対応フォント（Hiragino・Noto Sans JP 等）を名前で検索します。特定のフォントを使いたい場合は `config/crawler.yaml` の `report.japanese_font_path` で明示指定できます。
+ワードクラウド（原文＋AI要約テキスト対象）は、まず SudachiPy による日本語の形態素解析を試み、結果が空の場合のみ英数字抽出にフォールバックします。日本語フォントは `_detect_japanese_font()` が代表的なインストールパスを自動探索し、見つからない場合は matplotlib が認識済みのフォント一覧から CJK 対応フォント（Hiragino・Noto Sans JP 等）を名前で検索します。特定のフォントを使いたい場合は `config/crawler.yaml` の `report.japanese_font_path` で明示指定できます。
 
 ---
 
@@ -265,7 +264,12 @@ uv run news-crawler enrich --days 7 --retry-failed
 
 # 使うLLMを1つに固定（フォールバックしない）
 uv run news-crawler enrich --llm gemini
+
+# ダイジェスト・ワードクラウドの自動更新をスキップ
+uv run news-crawler enrich --no-update-digest
 ```
+
+> **ダイジェスト連動の自動更新**: 1件以上の要約が成功すると、`--days` の範囲を含む各週の週次ダイジェスト＋ワードクラウドSVGが自動で再生成されます。ワードクラウドは原文＋AI要約テキストを入力とするため、要約の増加がそのまま反映されます。
 
 **LLM エンドポイントと自動フォールバック**: `config/crawler.yaml` の `ai.endpoints` に OpenAI 互換のエンドポイントを定義し、`ai.endpoint_order` の先頭から順に、「到達でき、対象モデルがロード済み」の最初のものを使います（実行時に `LLM endpoint: ...` を表示）。
 
@@ -273,9 +277,9 @@ uv run news-crawler enrich --llm gemini
 | --- | --- | --- | --- |
 | 1 | `lmstudio_12b` | `localhost:1234`（LM Studio。LM Link 経由でリモート機のモデルが見える） | `google/gemma-4-12b-qat` |
 | 2 | `lmstudio_local` | `localhost:1234` | `google/gemma-4-e4b` |
-| 明示指定 | `gemini` | Google Gemini API（OpenAI 互換） | `gemini-2.5-flash-lite` |
+| 明示指定 | `gemini` | `localhost:4000`（LiteLLM プロキシ経由で Gemini API） | `gemini-2.5-flash-lite` |
 
-- `gemini` は既定の順序に入れていません（記事本文が外部に送られ、従量課金のため）。`--llm gemini` で明示したときだけ使います。API キーは `.env` に `GEMINI_API_KEY=...` と書きます（`.env` は Git 管理外）。
+- `gemini` は既定の順序に入れていません（記事本文が外部に送られ、従量課金のため）。`--llm gemini` で明示したときだけ使います。**この環境の正規経路は LiteLLM プロキシ（`localhost:4000`、open-webui-stack）経由**で、本物の `GEMINI_API_KEY` は LiteLLM 側（`open-webui-stack/litellm.env`）が保持します。news_crawler 側は `.env` に `LITELLM_API_KEY=...`（LiteLLM のマスター/仮想キー）を書くだけで使えます（`.env` は Git 管理外）。
 - `endpoints` を空にすると、従来どおり `ai.proxy_url` / `ai.model`（環境変数 `AIA_PROXY_URL` / `AIA_MODEL` で上書き可）の単一エンドポイントで動きます。
 - **思考（reasoning）モデルでは `ai.max_tokens` を大きくします**。gemma-4 は思考トークンも `max_tokens` を消費し、上限が小さいと返答が空になって全件失敗します（既定 500 → `crawler.yaml` では 3000）。エンドポイントごとに `max_tokens` で上書きできます。
 - **プロンプトを変えたら `ai.prompt_version` を上げます**（例: `"1"` → `"2"`）。次回の `enrich` で、旧バージョンで処理済みの記事も再要約の対象になります（公開日の新しい順に `--limit` 件ずつ）。上げなければ処理済み記事は再処理されません。
@@ -286,7 +290,7 @@ uv run news-crawler enrich --llm gemini
 
 ### 週次ダイジェスト（`digest`）
 
-記事を月曜始まりの1週間単位でまとめ、AI要約および原文ワードクラウドSVG付きの Markdown を**週ごと・年ごとのフォルダ**に出力します。
+記事を月曜始まりの1週間単位でまとめ、AI要約およびワードクラウドSVG（原文＋AI要約）付きの Markdown を**週ごと・年ごとのフォルダ**に出力します。
 
 ```bash
 uv run news-crawler digest                                   # 直近の週（月曜〜日曜）
@@ -297,8 +301,8 @@ uv run news-crawler digest -o /tmp/digests                   # 出力先の変�
 ```
 
 - 出力先は `<report.output_dir>/<YYYY>/digest_<YYYY>-W<ww>.md`（ISO週番号）。**冪等上書き**で、同週内の再実行はその週のファイルを最新状態にアップデートし、ファイルを増やしません。
-- **クロール連動の自動更新**: `news-crawler crawl` 実行時にも直近7日分を対象として自動で重複排除および本ダイジェスト＋ワードクラウドSVGの更新が行われます。日常運用では `crawl` を実行するだけで常に当週のダイジェストが最新化されます。過去週の再生成や特定期間の更新には本 `digest` サブコマンドを使用します。
-- 内容は front matter（`week`, `week_start`, `week_end`, `total_articles`, `ai_summarized`, `llm_models`）→原文ワードクラウドSVG（`![ワードクラウド](svg/digest_<YYYY>-W<ww>_wordcloud.svg)`）→日別見出し（新しい日順）→ソース別（件数の多い順）→時刻の新しい順の「日本語タイトル（リンク）＋要約」。AI 未処理の記事は原題とリンクのみです。
+- **クロール・要約連動の自動更新**: `news-crawler crawl` 実行時にも直近7日分を対象として自動で重複排除および本ダイジェスト＋ワードクラウドSVGの更新が行われます。`enrich` で要約が1件以上成功した場合も `--days` 範囲を含む各週が同様に自動更新されます（要約テキストがワードクラウド入力に加わるため、画像にも反映されます）。日常運用では `crawl` / `enrich` を実行するだけで常に当週のダイジェストが最新化されます。過去週の再生成や特定期間の更新には本 `digest` サブコマンドを使用します。
+- 内容は front matter（`week`・`week_start`・`week_end`・`total_articles`・`ai_summarized`・`llm_models`）→ワードクラウドSVG（原文＋AI要約。`![ワードクラウド](svg/digest_<YYYY>-W<ww>_wordcloud.svg)`）→日別見出し（新しい日順）→ソース別（件数の多い順）→時刻の新しい順の「日本語タイトル（リンク）＋要約」。AI 未処理の記事は原題とリンクのみです。
 - **週単位で丸ごと出力**します。指定期間は自動的に月曜 0:00 〜 日曜 23:59 の週境界に広げて DB から取得するため、週の途中で実行しても週前半の記事が消えることはありません。指定範囲の外の週に振り分けられた記事は書き出さず、警告（`Skipped ...`）を出します（欠けたファイルで完全版を上書きしないため）。
 - 重複記事（`dedupe --apply` 済み）と `enabled: false` のソースは既定で除外します。
 - **既知の不具合**: スクレイパーが公開日を誤って未来（例: 2028-08-09）にした記事は、公開日で絞り込むためどの週のファイルにも入りません（2026-09-20 時点で競馬ラボの告知記事 1 件）。原因は未調査です。
