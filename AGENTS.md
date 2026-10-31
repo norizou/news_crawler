@@ -55,6 +55,10 @@ uv run news-crawler enrich --days 7 --retry-failed
 # LLM を1つに固定（既定は ai.endpoint_order の先頭から自動選択）
 uv run news-crawler enrich --llm gemini   # 要 .env の LITELLM_API_KEY（LiteLLM経由）
 
+# Gemini Batch API（半額・非同期。Google 直結で要 .env の GEMINI_API_KEY）。投入→回収の2段
+uv run news-crawler enrich --llm gemini --batch [--wait]
+uv run news-crawler enrich-collect [--wait]
+
 # レポート生成（sources.yaml で enabled: false のソースは既定で自動除外。
 # タイトル・タグは sources.yaml または --title, --tags で柔軟に指定可。
 # 別のソース定義を使う場合は --sources-file / -f で切り替え可能）
@@ -147,6 +151,8 @@ npm run lint:fix
    - `lmstudio_12b`（`gemma-4-12b-qat`）は LM Link 経由のリモート機モデルで、`/models` に出たり消えたりすることがある。不在時はローカル常駐の `lmstudio_12b_full`（`gemma-4-12b`、フル精度）へ自動フォールバックする（2026/10/14 追加）。
    - `gemini` は外部送信・従量課金のため既定の順序に入れない。**正規経路は LiteLLM プロキシ（`localhost:4000`、open-webui-stack）経由**で、本物の `GEMINI_API_KEY` は `open-webui-stack/litellm.env` が保持する。news_crawler 側は `.env` の `LITELLM_API_KEY`（LiteLLM マスター/仮想キー、Git に入れない）で認証する。
    - **思考モデルは `max_tokens` を大きくする**（gemma-4 は思考トークンも消費する。500 だと `content` が空になり全件 `Invalid AI response format` で失敗）。**思考を無効化するには `ai.reasoning_effort: "none"`**（2026/10/25 追加。要約用途ではこれで十分速い。エンドポイント別に `reasoning_effort` を上書き可能で、`""` 指定はパラメータ自体を送らない＝gemini 用）。
+   - **`pack_size`（2026/10/31 追加）**: エンドポイント別に N 件を1リクエストにまとめる（`gemini` は 10）。応答は `{"articles":[{id,title_ja,summary_ja}]}` を json_schema で強制。欠けた id・不正要素はその記事だけ failed。`pack_size` 未設定（LM Studio 系）は1件1リクエストのまま。
+   - **`--batch` / `enrich-collect`（2026/10/31 追加）**: `batch_api` を持つエンドポイントだけ。LiteLLM 1.106 は Gemini(AI Studio) の batch を中継できないため `gemini_batch.py` が `generativelanguage.googleapis.com` を直接叩く（`GEMINI_API_KEY`）。Batch では LiteLLM の `/models` 疎通確認をしない。投入中の記事は `ai_batch_jobs`/`ai_batch_items` で管理し `get_pending_articles` から除外。実 API は Operation 包みで `metadata.state = BATCH_STATE_*` を返す（`JOB_STATE_*` に正規化して保存。結果保存後は `COLLECTED`）。
    - 記録される `ai_model` は実際に使ったモデル。
    - **`ai.prompt_version` を上げると、旧バージョンで処理済みの記事も次回 `enrich` の対象になる**（`get_pending_articles` が `ai_prompt_version` の不一致を拾う）。`system_prompt` を変えたら必ず上げる。`--limit` 省略時は `ai.max_articles_per_run`。
    - LM Studio が一時的に応答しないと `400 Bad Request` で失敗することがある。`--retry-failed` で再試行する。

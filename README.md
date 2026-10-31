@@ -267,6 +267,12 @@ uv run news-crawler enrich --llm gemini
 
 # ダイジェスト・ワードクラウドの自動更新をスキップ
 uv run news-crawler enrich --no-update-digest
+
+# Gemini Batch API に投入（単価50%引き・非同期）。結果は enrich-collect で回収
+uv run news-crawler enrich --llm gemini --batch
+uv run news-crawler enrich-collect          # 終わったジョブだけ回収（未完了はそのまま）
+uv run news-crawler enrich-collect --wait   # 全ジョブ完了まで待って回収
+uv run news-crawler enrich --llm gemini --batch --wait   # 投入して完了まで待つ
 ```
 
 > **ダイジェスト連動の自動更新**: 1件以上の要約が成功すると、`--days` の範囲を含む各週の週次ダイジェスト＋ワードクラウドSVGが自動で再生成されます。ワードクラウドは原文＋AI要約テキストを入力とするため、要約の増加がそのまま反映されます。
@@ -280,6 +286,8 @@ uv run news-crawler enrich --no-update-digest
 | 明示指定 | `gemini` | `localhost:4000`（LiteLLM プロキシ経由で Gemini API） | `gemini-2.5-flash-lite` |
 
 - `gemini` は既定の順序に入れていません（記事本文が外部に送られ、従量課金のため）。`--llm gemini` で明示したときだけ使います。**この環境の正規経路は LiteLLM プロキシ（`localhost:4000`、open-webui-stack）経由**で、本物の `GEMINI_API_KEY` は LiteLLM 側（`open-webui-stack/litellm.env`）が保持します。news_crawler 側は `.env` に `LITELLM_API_KEY=...`（LiteLLM のマスター/仮想キー）を書くだけで使えます（`.env` は Git 管理外）。
+- **複数記事のパック（`pack_size`）**: エンドポイントに `pack_size: N` を書くと、N 件の記事を `### id=<記事ID>` 見出し付きで1リクエストにまとめ、`{"articles": [{id, title_ja, summary_ja}, ...]}` を JSON スキーマで返させます。システムプロンプトを記事ごとに送らずに済むので入力トークンが減ります（`gemini` は `pack_size: 10`）。出力上限は `max_tokens × 件数`（`pack_max_tokens` で上書き可）。応答に無い記事・形式不正の記事だけが failed になり、`--retry-failed` で再処理できます。`pack_size` の無いエンドポイント（ローカル LM Studio）は従来どおり1件1リクエストです。
+- **Gemini Batch API（`--batch`）**: `batch_api` を持つエンドポイント（`gemini`）だけで使えます。LiteLLM は Gemini の Batch を中継できないため、**Google に直接**送ります（`.env` に `GEMINI_API_KEY=...` が必要。値は `open-webui-stack/litellm.env` と同じ）。各リクエストに `pack_size` 件を詰めるので、パックと Batch 半額の両方が効きます。結果は数分〜最大24時間後に返るため「投入（`enrich --batch`）→回収（`enrich-collect`）」の2段で使います。投入中の記事は `ai_batch_jobs` / `ai_batch_items` テーブルで管理し、通常の `enrich` や次の投入から除外されます（二重送信防止）。失敗・期限切れのジョブは閉じられ、記事は次回の対象に戻ります。投入後に本文が更新された記事は回収時にスキップされます。
 - `endpoints` を空にすると、従来どおり `ai.proxy_url` / `ai.model`（環境変数 `AIA_PROXY_URL` / `AIA_MODEL` で上書き可）の単一エンドポイントで動きます。
 - **思考（reasoning）モデルでは `ai.max_tokens` を大きくします**。gemma-4 は思考トークンも `max_tokens` を消費し、上限が小さいと返答が空になって全件失敗します（既定 500 → `crawler.yaml` では 3000）。エンドポイントごとに `max_tokens` で上書きできます。
 - **プロンプトを変えたら `ai.prompt_version` を上げます**（例: `"1"` → `"2"`）。次回の `enrich` で、旧バージョンで処理済みの記事も再要約の対象になります（公開日の新しい順に `--limit` 件ずつ）。上げなければ処理済み記事は再処理されません。
