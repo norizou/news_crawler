@@ -5,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import click
+import httpx
 from rich.console import Console
 from rich.table import Table
 
@@ -58,6 +59,107 @@ def _refresh_weekly_digests(app_config: AppConfig, *, days: int | None = None) -
             console.print(f"  [green]Updated:[/green] {path} ({n} articles)")
     except Exception as e:
         console.print(f"[yellow]Warning: Failed to update digest/wordcloud:[/yellow] {e}")
+
+
+def _submit_batch(
+    processor: AIProcessor,
+    app_config: AppConfig,
+    db: Database,
+    days: int,
+    limit: int,
+    retry_failed: bool,
+    wait: bool,
+    update_digest: bool,
+) -> None:
+    """`enrich --batch`: submit one Gemini batch job, optionally waiting for it."""
+    try:
+        sub = asyncio.run(
+            processor.submit_batch(days=days, limit=limit, retry_failed=retry_failed)
+        )
+    except (ValueError, httpx.HTTPError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1) from e
+
+    if sub["job_name"] is None:
+        console.print("[dim]No eligible articles to submit.[/dim]")
+        return
+    console.print(
+        f"Submitted batch job [cyan]{sub['job_name']}[/cyan] ({processor.config.model}): "
+        f"{sub['articles']} articles in {sub['requests']} requests"
+    )
+    if not wait:
+        console.print("Collect results later with: [bold]news-crawler enrich-collect[/bold]")
+        return
+    _collect_batches(processor, app_config, days, wait=True, update_digest=update_digest)
+
+
+def _collect_batches(
+    processor: AIProcessor,
+    app_config: AppConfig,
+    days: int,
+    *,
+    wait: bool,
+    update_digest: bool,
+) -> None:
+    try:
+        stats = asyncio.run(processor.collect_batches(wait=wait))
+    except (ValueError, httpx.HTTPError) as e:
+        console.print(f"[red]{e}[/red]")
+        raise SystemExit(1) from e
+
+    console.print("\n[bold]Batch Collect Summary:[/bold]")
+    console.print(f"  Jobs collected: {stats['collected']}")
+    console.print(f"  Jobs closed without results: {stats['closed']}")
+    console.print(f"  Jobs still running: {stats['open']}")
+    console.print(f"  Success: [green]{stats['success']}[/green]")
+    console.print(f"  Failed: [red]{stats['failed']}[/red]")
+    console.print(f"  Skipped (changed since submit): {stats['skipped']}")
+
+    if update_digest and stats["success"] > 0:
+        console.print("[cyan]Updating weekly digests and wordcloud...[/cyan]")
+        _refresh_weekly_digests(app_config, days=days)
+
+
+@main.command("enrich-collect")
+@click.option(
+    "--llm",
+    type=str,
+    default="gemini",
+    help="Endpoint whose batch_api settings to use (default: gemini).",
+)
+@click.option(
+    "--wait",
+    is_flag=True,
+    default=False,
+    help="Poll until every open batch job has finished.",
+)
+@click.option(
+    "--days",
+    "-d",
+    type=int,
+    default=7,
+    help="Window for the digest update after collecting (default: 7).",
+)
+@click.option(
+    "--update-digest/--no-update-digest",
+    default=True,
+    help="Update affected weeks' digests and wordcloud after collecting (default: True).",
+)
+@click.option(
+    "--config-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default="config",
+    help="Path to configuration directory.",
+)
+def enrich_collect(
+    llm: str, wait: bool, days: int, update_digest: bool, config_dir: Path
+) -> None:
+    """Check Gemini batch jobs from `enrich --batch` and save finished results."""
+    app_config = load_config(config_dir)
+    db = Database(app_config.crawler.database_path)
+    processor = AIProcessor(app_config.ai, db)
+    processor.only_endpoint = llm
+    _collect_batches(processor, app_config, days, wait=wait, update_digest=update_digest)
 
 
 @main.command()
@@ -327,6 +429,19 @@ def report(
     help="Use only this endpoint from ai.endpoints (e.g. gemini). Default: ai.endpoint_order.",
 )
 @click.option(
+    "--batch",
+    is_flag=True,
+    default=False,
+    help="Submit to the Gemini Batch API (half price, async) instead of calling the LLM now. "
+    "Needs --llm with batch_api settings; collect results with enrich-collect.",
+)
+@click.option(
+    "--wait",
+    is_flag=True,
+    default=False,
+    help="With --batch: poll until the job finishes and save results right away.",
+)
+@click.option(
     "--sources-file",
     "-f",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -349,6 +464,8 @@ def enrich(
     limit: int | None,
     retry_failed: bool,
     llm: str | None,
+    batch: bool,
+    wait: bool,
     sources_file: Path | None,
     update_digest: bool,
     config_dir: Path,
@@ -366,6 +483,13 @@ def enrich(
     db = Database(app_config.crawler.database_path)
     processor = AIProcessor(app_config.ai, db)
     processor.only_endpoint = llm
+
+    if wait and not batch:
+        console.print("[red]--wait is only valid with --batch[/red]")
+        raise SystemExit(1)
+    if batch:
+        _submit_batch(processor, app_config, db, days, limit, retry_failed, wait, update_digest)
+        return
 
     console.print(f"Starting AI enrichment for articles from last {days} days...")
     console.print(f"Max articles: {limit}, Retry failed: {retry_failed}")

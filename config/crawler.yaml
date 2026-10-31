@@ -44,6 +44,11 @@ ai:
       max_tokens: 1000
       reasoning_effort: ""        # gemini は reasoning_effort を送らない（外部API側の受理値が異なるため無効化）
       pack_size: 10               # 10記事を1リクエストにまとめる（システムプロンプトの重複送信を減らしてコスト削減）。出力上限は max_tokens×件数
+      batch_api:                  # enrich --llm gemini --batch で使う Gemini Batch API（単価50%引き・非同期）。LiteLLM を通さず Google に直接送る
+        base_url: "https://generativelanguage.googleapis.com/v1beta"
+        model: "gemini-2.5-flash-lite"
+        api_key_env: GEMINI_API_KEY   # .env に GEMINI_API_KEY=...（値は open-webui-stack/litellm.env の GEMINI_API_KEY と同じ）
+        poll_interval: 30
   # 下2行は endpoints 未使用時の単一エンドポイント設定（後方互換）
   proxy_url: "http://localhost:1234/v1"
   model: "google/gemma-4-e4b"

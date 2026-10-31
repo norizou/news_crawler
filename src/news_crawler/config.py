@@ -43,6 +43,24 @@ class CrawlerConfig(BaseModel):
     output_dir: str = Field(default="output", description="Output directory for reports")
 
 
+class GeminiBatchConfig(BaseModel):
+    """Gemini Batch API settings for `enrich --batch` (calls Google directly, not LiteLLM)."""
+
+    base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        description="Gemini API base URL",
+    )
+    api_key_env: str = Field(
+        default="GEMINI_API_KEY", description="Env var holding the Gemini API key"
+    )
+    model: str | None = Field(
+        default=None, description="Model ID for batch jobs (None = the endpoint's model)"
+    )
+    poll_interval: float = Field(
+        default=30.0, description="Seconds between status checks with --wait"
+    )
+
+
 class AIEndpoint(BaseModel):
     """One OpenAI-compatible LLM endpoint that enrichment can use."""
 
@@ -67,6 +85,9 @@ class AIEndpoint(BaseModel):
         default=None,
         description="Max completion tokens for a packed request "
         "(None = max_tokens x pack_size)",
+    )
+    batch_api: GeminiBatchConfig | None = Field(
+        default=None, description="Enables `enrich --batch` for this endpoint"
     )
 
     @field_validator("pack_size")

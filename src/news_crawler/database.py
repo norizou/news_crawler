@@ -15,6 +15,15 @@ from news_crawler.normalizer import (
     normalize_url,
 )
 
+# Batch job states after which a job's articles are no longer in flight.
+# A succeeded job stays open until its results are saved, then becomes COLLECTED.
+BATCH_FINAL_STATES = [
+    "JOB_STATE_FAILED",
+    "JOB_STATE_CANCELLED",
+    "JOB_STATE_EXPIRED",
+    "COLLECTED",
+]
+
 
 class Database:
     """SQLite Database wrapper with FTS5 support."""
@@ -136,6 +145,25 @@ class Database:
                     INSERT INTO article_fts(rowid, title, summary, content, category)
                     VALUES (new.id, new.title, new.summary, new.content, new.category);
                 END;
+
+                -- Gemini Batch API jobs submitted by `enrich --batch` and their articles
+                CREATE TABLE IF NOT EXISTS ai_batch_jobs (
+                    job_name TEXT PRIMARY KEY,
+                    model TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL,
+                    finished_at TIMESTAMP,
+                    error TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS ai_batch_items (
+                    job_name TEXT NOT NULL,
+                    article_id INTEGER NOT NULL,
+                    input_hash TEXT NOT NULL,
+                    pack_key TEXT NOT NULL,
+                    PRIMARY KEY (job_name, article_id)
+                );
                 """
             )
 
@@ -614,12 +642,15 @@ class Database:
         limit: int = 50,
         retry_failed: bool = False,
         prompt_version: str | None = None,
+        exclude_in_flight: bool = True,
     ) -> list[Article]:
         """Get articles needing AI enrichment within the last N days.
 
         ``prompt_version`` additionally selects already-completed articles that
         were enriched under a different prompt version, so bumping
         ``ai.prompt_version`` re-summarizes them with the new system prompt.
+        ``exclude_in_flight`` leaves out articles waiting in an unfinished
+        batch job, so they are not sent twice.
         """
         cutoff_iso = (datetime.now() - timedelta(days=days)).isoformat()
         params: list[Any] = [cutoff_iso, cutoff_iso]
@@ -641,6 +672,15 @@ class Database:
             AND ({" OR ".join(status_conditions)})
             AND duplicate_of_id IS NULL
         """
+        if exclude_in_flight:
+            query += f"""
+            AND id NOT IN (
+                SELECT i.article_id FROM ai_batch_items i
+                JOIN ai_batch_jobs j ON j.job_name = i.job_name
+                WHERE j.state NOT IN ({", ".join("?" * len(BATCH_FINAL_STATES))})
+            )
+            """
+            params.extend(BATCH_FINAL_STATES)
 
         query += " ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT ?"
         params.append(limit)
@@ -732,6 +772,80 @@ class Database:
                     article_id,
                 ),
             )
+
+    def create_batch_job(
+        self,
+        job_name: str,
+        model: str,
+        prompt_version: str,
+        state: str,
+        items: list[tuple[int, str, str]],
+    ) -> None:
+        """Record a submitted batch job and its (article_id, input_hash, pack_key) items."""
+        with self.connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_batch_jobs (job_name, model, prompt_version, state, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (job_name, model, prompt_version, state, datetime.now().isoformat()),
+            )
+            conn.executemany(
+                """
+                INSERT INTO ai_batch_items (job_name, article_id, input_hash, pack_key)
+                VALUES (?, ?, ?, ?)
+                """,
+                [(job_name, aid, h, key) for aid, h, key in items],
+            )
+
+    def list_open_batch_jobs(self) -> list[dict[str, Any]]:
+        """Batch jobs not yet in a final state, oldest first."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM ai_batch_jobs
+                WHERE state NOT IN ({", ".join("?" * len(BATCH_FINAL_STATES))})
+                ORDER BY created_at
+                """,
+                BATCH_FINAL_STATES,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_batch_items(self, job_name: str) -> list[dict[str, Any]]:
+        """Items (article_id, input_hash, pack_key) of one batch job."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM ai_batch_items WHERE job_name = ? ORDER BY pack_key, article_id",
+                (job_name,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_batch_job_state(
+        self, job_name: str, state: str, error: str | None = None
+    ) -> None:
+        """Update a job's state; final states also stamp finished_at."""
+        finished = datetime.now().isoformat() if state in BATCH_FINAL_STATES else None
+        with self.connection() as conn:
+            conn.execute(
+                """
+                UPDATE ai_batch_jobs
+                SET state = ?, error = COALESCE(?, error),
+                    finished_at = COALESCE(?, finished_at)
+                WHERE job_name = ?
+                """,
+                (state, error, finished, job_name),
+            )
+
+    def get_articles_by_ids(self, article_ids: list[int]) -> dict[int, Article]:
+        """Current articles by id (used to detect content changed since submission)."""
+        if not article_ids:
+            return {}
+        with self.connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM articles WHERE id IN ({', '.join('?' * len(article_ids))})",
+                article_ids,
+            ).fetchall()
+            return {row["id"]: self._row_to_article(row) for row in rows}
 
     def save_ai_failure(self, article_id: int, error_message: str) -> None:
         """Save AI enrichment failure for an article."""

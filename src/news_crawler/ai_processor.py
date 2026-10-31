@@ -5,13 +5,15 @@ import json
 import os
 import re
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 import httpx
 from pydantic import ValidationError
 
 from news_crawler.config import AIConfig, AIEndpoint
-from news_crawler.database import Database
+from news_crawler.database import BATCH_FINAL_STATES, Database
+from news_crawler.gemini_batch import BatchStatus, GeminiBatchClient, build_request
 from news_crawler.models import AIResponse, Article
 
 PACKED_PROMPT_SUFFIX = """\
@@ -59,6 +61,8 @@ class AIProcessor:
         self.active_endpoint: str | None = None
         self.only_endpoint: str | None = None
         self._auth_env: str | None = None
+        self.batch_client_factory: Callable[[str, str], GeminiBatchClient] = GeminiBatchClient
+        self.batch_poll_interval: float = 30.0
 
     def _api_key(self, endpoint: AIEndpoint) -> str | None:
         return os.getenv(endpoint.api_key_env) if endpoint.api_key_env else None
@@ -97,25 +101,192 @@ class AIProcessor:
                 raise ValueError(f"Unknown LLM endpoint: {name} (available: {', '.join(by_name)})")
             reason = await self._probe(ep)
             if reason is None:
-                self.config = cfg.model_copy(
-                    update={
-                        "proxy_url": ep.proxy_url,
-                        "model": ep.model,
-                        "max_tokens": ep.max_tokens or cfg.max_tokens,
-                        "reasoning_effort": (
-                            ep.reasoning_effort
-                            if ep.reasoning_effort is not None
-                            else cfg.reasoning_effort
-                        ),
-                        "pack_size": ep.pack_size or 1,
-                        "pack_max_tokens": ep.pack_max_tokens,
-                    }
-                )
-                self._auth_env = ep.api_key_env
-                self.active_endpoint = name
+                self._apply_endpoint(ep)
                 return name
             reasons.append(f"{name}: {reason}")
         raise RuntimeError("No usable LLM endpoint (" + "; ".join(reasons) + ")")
+
+    def _apply_endpoint(self, ep: AIEndpoint, model: str | None = None) -> None:
+        """Apply an endpoint's settings to self.config (no reachability check)."""
+        cfg = self.config
+        self.config = cfg.model_copy(
+            update={
+                "proxy_url": ep.proxy_url,
+                "model": model or ep.model,
+                "max_tokens": ep.max_tokens or cfg.max_tokens,
+                "reasoning_effort": (
+                    ep.reasoning_effort if ep.reasoning_effort is not None else cfg.reasoning_effort
+                ),
+                "pack_size": ep.pack_size or 1,
+                "pack_max_tokens": ep.pack_max_tokens,
+            }
+        )
+        self._auth_env = ep.api_key_env
+        self.active_endpoint = ep.name
+
+    def _batch_client(self, endpoint: str | None) -> GeminiBatchClient:
+        """Apply a batch-capable endpoint and return a client for it.
+
+        Batch jobs go to Google directly, so LiteLLM's /models probe is skipped;
+        only the API key has to be present.
+        """
+        by_name = {e.name: e for e in self.config.endpoints}
+        ep = by_name.get(endpoint or "")
+        if ep is None:
+            raise ValueError(
+                f"Unknown LLM endpoint: {endpoint} (available: {', '.join(by_name)})"
+            )
+        if ep.batch_api is None:
+            raise ValueError(f"Endpoint {ep.name} has no batch_api settings")
+        key = os.getenv(ep.batch_api.api_key_env)
+        if not key:
+            raise ValueError(f"env {ep.batch_api.api_key_env} is not set")
+        self._apply_endpoint(ep, model=ep.batch_api.model)
+        self.batch_poll_interval = ep.batch_api.poll_interval
+        return self.batch_client_factory(ep.batch_api.base_url, key)
+
+    async def submit_batch(
+        self,
+        days: int = 7,
+        limit: int = 50,
+        retry_failed: bool = False,
+    ) -> dict[str, Any]:
+        """Submit pending articles as one Gemini batch job, packed `pack_size` per request."""
+        client = self._batch_client(self.only_endpoint)
+        articles = [
+            a
+            for a in self.db.get_pending_articles(
+                days=days,
+                limit=limit,
+                retry_failed=retry_failed,
+                prompt_version=self.config.prompt_version,
+            )
+            if a.id is not None and not self._is_up_to_date(a)
+        ]
+        if not articles:
+            return {"job_name": None, "articles": 0, "requests": 0}
+
+        size = self.config.pack_size
+        packs = [articles[i : i + size] for i in range(0, len(articles), size)]
+        requests = []
+        items: list[tuple[int, str, str]] = []
+        for idx, pack in enumerate(packs):
+            key = f"pack-{idx:04d}"
+            requests.append(
+                (
+                    key,
+                    build_request(
+                        self._build_packed_system_prompt(),
+                        self._build_packed_user_prompt(pack),
+                        max_output_tokens=(
+                            self.config.pack_max_tokens or self.config.max_tokens * len(pack)
+                        ),
+                        response_schema=PACKED_RESPONSE_SCHEMA,
+                    ),
+                )
+            )
+            items.extend(
+                (a.id, self._compute_input_hash(a), key) for a in pack if a.id is not None
+            )
+
+        display_name = f"news-crawler-{datetime.now():%Y%m%d-%H%M%S}"
+        status = await client.submit(self.config.model, requests, display_name)
+        self.db.create_batch_job(
+            job_name=status.name,
+            model=self.config.model,
+            prompt_version=self.config.prompt_version,
+            state=status.state,
+            items=items,
+        )
+        return {"job_name": status.name, "articles": len(items), "requests": len(requests)}
+
+    async def collect_batches(self, wait: bool = False) -> dict[str, int]:
+        """Check open batch jobs; save results of succeeded ones.
+
+        Failed/cancelled/expired jobs are closed without touching their articles,
+        which therefore become eligible for the next run again.
+        """
+        stats = {"open": 0, "collected": 0, "closed": 0, "success": 0, "failed": 0, "skipped": 0}
+        jobs = self.db.list_open_batch_jobs()
+        if not jobs:
+            return stats
+        client = self._batch_client(self.only_endpoint)
+
+        while True:
+            still_open = []
+            for job in jobs:
+                status = await client.get(job["job_name"])
+                if status.state == "JOB_STATE_SUCCEEDED":
+                    self._save_batch_results(job, status, stats)
+                    self.db.update_batch_job_state(job["job_name"], "COLLECTED")
+                    stats["collected"] += 1
+                elif status.state in BATCH_FINAL_STATES:
+                    error = str(status.raw.get("error") or "") or None
+                    self.db.update_batch_job_state(job["job_name"], status.state, error)
+                    stats["closed"] += 1
+                else:
+                    self.db.update_batch_job_state(job["job_name"], status.state)
+                    still_open.append(job)
+            jobs = still_open
+            if not wait or not jobs:
+                break
+            await self.sleeper(self.batch_poll_interval)
+
+        stats["open"] = len(jobs)
+        return stats
+
+    def _save_batch_results(
+        self, job: dict[str, Any], status: BatchStatus, stats: dict[str, int]
+    ) -> None:
+        items = self.db.get_batch_items(job["job_name"])
+        by_pack: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            by_pack.setdefault(item["pack_key"], []).append(item)
+
+        # Results normally echo metadata.key; fall back to submission order if not.
+        pack_keys = sorted(by_pack)
+        results = {
+            (r.key or (pack_keys[i] if i < len(pack_keys) else None)): r
+            for i, r in enumerate(status.results)
+        }
+        current = self.db.get_articles_by_ids([item["article_id"] for item in items])
+
+        for key, pack_items in by_pack.items():
+            result = results.get(key)
+            parsed: dict[int, AIResponse] = {}
+            error = None
+            if result is None:
+                error = "Missing from batch results"
+            elif result.error:
+                error = result.error
+            else:
+                try:
+                    parsed = self._parse_packed_response(result.text or "")
+                except ValueError as e:
+                    error = str(e)
+
+            for item in pack_items:
+                article = current.get(item["article_id"])
+                if article is None or self._compute_input_hash(article) != item["input_hash"]:
+                    # Deleted or re-crawled with new content since submission
+                    stats["skipped"] += 1
+                    continue
+                ai_result = parsed.get(item["article_id"])
+                if ai_result is None:
+                    self.db.save_ai_failure(
+                        item["article_id"], error or "Missing from packed AI response"
+                    )
+                    stats["failed"] += 1
+                    continue
+                self.db.save_ai_result(
+                    article_id=item["article_id"],
+                    title_ja=ai_result.title_ja,
+                    summary_ja=ai_result.summary_ja,
+                    model=job["model"],
+                    prompt_version=job["prompt_version"],
+                    input_hash=item["input_hash"],
+                )
+                stats["success"] += 1
 
     async def enrich_articles(
         self,
