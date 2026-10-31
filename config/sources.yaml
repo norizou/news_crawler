@@ -84,7 +84,7 @@ sources:
     name: "スポニチ競馬Web"
     category: "sports_paper"
     fetch_method: "html"
-    enabled: true
+    enabled: false # ソース絞り込み（JRA・日刊・netkeiba・ラジオNIKKEIのみ残す）のため無効化（2026-10-31）
     base_url: "https://keiba.sponichi.co.jp/"
     list_url: "https://keiba.sponichi.co.jp/"
     article_list_selector: "a[href^='/news/2']"
@@ -96,7 +96,7 @@ sources:
     name: "サンスポZBAT! 中央競馬"
     category: "sports_paper"
     fetch_method: "html"
-    enabled: true
+    enabled: false # ソース絞り込みのため無効化（2026-10-31）
     base_url: "https://www.sanspo.com/"
     list_url: "https://www.sanspo.com/race/keiba/"
     article_list_selector: "a[href^='/race/article/']"
@@ -108,7 +108,7 @@ sources:
     name: "競馬ラボ"
     category: "media"
     fetch_method: "html"
-    enabled: true
+    enabled: false # ソース絞り込みのため無効化（2026-10-31）
     base_url: "https://keibalab.jp/"
     list_url: "https://keibalab.jp/"
     # bbs.html（コメント欄）・backnumber.html・IDなしの "/topics/" は記事ではないため除外
@@ -124,7 +124,7 @@ sources:
     name: "東スポ競馬"
     category: "sports_paper"
     fetch_method: "playwright"
-    enabled: true
+    enabled: false # ソース絞り込みのため無効化（2026-10-31）
     base_url: "https://tospo-keiba.jp/"
     list_url: "https://tospo-keiba.jp/news"
     article_list_selector: "a[href*='/breaking_news/']"
